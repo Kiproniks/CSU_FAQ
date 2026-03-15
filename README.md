@@ -24,7 +24,7 @@ CSU_FAQ_clean/
     demo_query.py
     visualize_splitting.py
   harry_potter/
-    *.pdf
+    .gitkeep               # put your PDFs here locally
   chroma_db/               # current persistent vector index
   run_bot.py
   requirements.txt
@@ -65,6 +65,8 @@ Key variables:
 - `CHUNK_COLLECTION` - collection name (default `harry_potter_collection`)
 
 ## Reindex Harry Potter Books
+
+Place source PDFs into `harry_potter/` before running reindexing (PDFs are not committed to git).
 
 ```powershell
 python scripts/reindex_harry_potter.py
@@ -110,6 +112,8 @@ Artifacts are saved to `data/split_visualization/`:
 - `entity_based/*.txt|*.json` - how `EntityBased` split each book
 - `plots/*_lengths.png` - chunk length comparison charts
 - `SUMMARY.md` - per-book split statistics
+
+Note: `data/split_visualization/` is generated locally and ignored in git.
 
 ## Local LLM via Ollama
 
