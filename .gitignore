@@ -1,0 +1,25 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+venv/
+.venv/
+
+# Local env
+.env
+
+# Local indexes and generated artifacts
+*.sqlite3
+*.bin
+*.pickle
+search_visualization.png
+/data/chroma_db/
+/ChunkBased/chroma_db/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+
+# Local notes
+#U041f#U0440#U043e#U0447#U0442#U0438#U041c#U0435#U043d#U044f.txt
