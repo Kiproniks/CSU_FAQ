@@ -1,2 +1,0 @@
-Открой консоль в этой директории и введи:
-pip install -r requirements.txt
