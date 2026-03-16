@@ -2,6 +2,8 @@
 numpy
 scikit-learn
 matplotlib
+aiogram==3.13.1
+openai>=1.30.0
 
 # ==================== РАБОТА С PDF (Гарри Поттер и т.д.) ====================
 pypdf
