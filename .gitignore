@@ -21,13 +21,13 @@ search_visualization.png
 /data/split_visualization/
 
 # Source documents (keep folder locally, do not commit PDFs)
-/harry_potter/*.pdf
+#/harry_potter/*.pdf
 
 # OS/editor
 .DS_Store
 Thumbs.db
 
 # Local notes
-ПрочтиМеня.txt
+#ПрочтиМеня.txt
 #U041f#U0440#U043e#U0447#U0442#U0438#U041c#U0435#U043d#U044f.txt
 
