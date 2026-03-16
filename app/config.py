@@ -1,13 +1,15 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
 from dataclasses import dataclass
 from dotenv import load_dotenv
 
+# Загружаем переменные окружения из .env один раз при импорте.
 load_dotenv()
 
 
 def _as_bool(value: str, default: bool = False) -> bool:
+    # Преобразуем строковые флаги в bool с безопасным значением по умолчанию.
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
@@ -15,6 +17,7 @@ def _as_bool(value: str, default: bool = False) -> bool:
 
 @dataclass
 class Settings:
+    # Настройки рантайма и API.
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     llm_provider: str = os.getenv("LLM_PROVIDER", "echo")
     llm_model: str = os.getenv("LLM_MODEL", "llama3.1:8b")
@@ -33,4 +36,6 @@ class Settings:
     )
 
 
+# Общий экземпляр настроек приложения, используемый во всех модулях.
 settings = Settings()
+

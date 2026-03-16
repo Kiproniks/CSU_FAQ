@@ -1,20 +1,28 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import requests
 
 from app.config import settings
 
+if TYPE_CHECKING:
+    # Тип клиента нужен только для статической проверки.
+    from openai import OpenAI as OpenAIClient
+else:
+    OpenAIClient = Any
+
 try:
-    from openai import OpenAI
+    # Библиотека OpenAI опциональна: при отсутствии пакета используем безопасный fallback.
+    from openai import OpenAI as OpenAIClass
 except Exception:  # pragma: no cover
-    OpenAI = None
+    OpenAIClass = None
 
 
 @dataclass
 class LLMResponse:
+    # Единый формат результата для всех LLM-бэкендов.
     answer: str
     provider: str
     model: str
@@ -22,23 +30,30 @@ class LLMResponse:
 
 class LLMService:
     def __init__(self) -> None:
+        # Выбор бэкенда читаем один раз; маршрутизация делается в generate_answer().
         self.provider = settings.llm_provider.lower()
         self.model = settings.llm_model
-        self.client: Optional[OpenAI] = None
-        if self.provider == "openai" and settings.openai_api_key and OpenAI is not None:
-            self.client = OpenAI(api_key=settings.openai_api_key)
+        self.client: Optional[OpenAIClient] = None
+        if self.provider == "openai" and settings.openai_api_key and OpenAIClass is not None:
+            self.client = OpenAIClass(api_key=settings.openai_api_key)
 
     @staticmethod
     def _build_prompt(query: str, context: str) -> str:
         return (
-            "You are an assistant for a university RAG project. "
-            "Answer only from the provided context. "
-            "If context is insufficient, say it explicitly.\n\n"
-            f"Context:\n{context}\n\n"
-            f"Question: {query}"
+            "Ты ассистент университетского RAG-проекта.\n"
+            "Правила ответа:\n"
+            "1) Отвечай только на русском языке.\n"
+            "2) Используй только факты из блока CONTEXT.\n"
+            "3) Не упоминай retrieval, TF-IDF, chunk/entity, если об этом не спросили.\n"
+            "4) Не выдумывай факты. Если данных не хватает, напиши: "
+            "\"Недостаточно данных в найденных фрагментах.\"\n"
+            "5) Дай связный ответ на 3-6 предложений.\n\n"
+            f"CONTEXT:\n{context}\n\n"
+            f"QUESTION:\n{query}"
         )
 
     def _generate_openai(self, query: str, context: str) -> Optional[LLMResponse]:
+        # Ветка OpenAI: используем Responses API и приводим ответ к LLMResponse.
         if self.client is None:
             return None
 
@@ -54,6 +69,7 @@ class LLMService:
         )
 
     def _generate_ollama(self, query: str, context: str) -> Optional[LLMResponse]:
+        # Ветка Ollama: локальный HTTP-вызов с низкой temperature для стабильных ответов.
         prompt = self._build_prompt(query, context)
         try:
             response = requests.post(
@@ -62,6 +78,10 @@ class LLMService:
                     "model": self.model,
                     "prompt": prompt,
                     "stream": False,
+                    "options": {
+                        "temperature": 0.2,
+                        "top_p": 0.9,
+                    },
                 },
                 timeout=settings.llm_timeout_sec,
             )
@@ -77,10 +97,12 @@ class LLMService:
                 model=self.model,
             )
         except Exception:
+            # Любая ошибка сети/модели уходит во fallback без падения приложения.
             return None
 
     @staticmethod
     def _echo_fallback(query: str, context: str, reason: str = "") -> LLMResponse:
+        # Безопасный debug-fallback, возвращающий исходный контекст для прозрачности.
         prefix = "LLM fallback mode (echo)."
         if reason:
             prefix = f"{prefix} Reason: {reason}"
@@ -96,6 +118,7 @@ class LLMService:
         )
 
     def generate_answer(self, query: str, context: str) -> LLMResponse:
+        # Маршрутизатор провайдеров с устойчивой цепочкой fallback.
         if self.provider == "openai":
             result = self._generate_openai(query, context)
             if result is not None:

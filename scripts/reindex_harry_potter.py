@@ -1,10 +1,11 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
 import sys
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+# Делаем корень проекта импортируемым при прямом запуске скрипта.
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
@@ -13,6 +14,7 @@ from app.rag_pipeline import RAGPipeline
 
 
 def parse_args() -> argparse.Namespace:
+    # Параметры CLI для одноразовой переиндексации.
     parser = argparse.ArgumentParser(description="Reindex Harry Potter PDFs")
     parser.add_argument(
         "--books-dir",
@@ -33,6 +35,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    # Создаем пайплайн один раз и при необходимости очищаем выбранные индексы.
     args = parse_args()
     books_dir = Path(args.books_dir)
 
@@ -46,6 +49,7 @@ def main() -> None:
         pipeline.entity_engine.clear()
         print("Entity index cleared.")
 
+    # Проходим по всем PDF и индексируем каждый документ в оба ретривера.
     pdf_files = sorted(books_dir.glob("*.pdf"))
     if not pdf_files:
         print(f"No PDF files found in: {books_dir}")
@@ -73,3 +77,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

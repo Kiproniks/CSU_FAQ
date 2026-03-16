@@ -1,4 +1,4 @@
-# Python cache
+﻿# Python cache
 __pycache__/
 *.py[cod]
 
@@ -13,7 +13,9 @@ venv/
 *.sqlite3
 *.bin
 *.pickle
+*.png
 search_visualization.png
+/chroma_db/
 /data/chroma_db/
 /ChunkBased/chroma_db/
 /data/split_visualization/
@@ -26,4 +28,6 @@ search_visualization.png
 Thumbs.db
 
 # Local notes
-\#U041f\#U0440\#U043e\#U0447\#U0442\#U0438\#U041c\#U0435\#U043d\#U044f.txt
+ПрочтиМеня.txt
+#U041f#U0440#U043e#U0447#U0442#U0438#U041c#U0435#U043d#U044f.txt
+

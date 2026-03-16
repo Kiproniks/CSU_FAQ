@@ -1,10 +1,11 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
 import sys
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+# Делаем корень проекта импортируемым при прямом запуске скрипта.
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
@@ -12,6 +13,7 @@ from app.rag_pipeline import RAGPipeline
 
 
 def parse_args() -> argparse.Namespace:
+    # Параметры CLI для учебного/демонстрационного запуска.
     parser = argparse.ArgumentParser(description="Demo for chunk/entity retrieval and final RAG answer")
     parser.add_argument(
         "query",
@@ -39,6 +41,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def _snippet(text: str, limit: int = 220) -> str:
+    # Держим консольный вывод компактным.
     compact = " ".join(text.split())
     if len(compact) <= limit:
         return compact
@@ -46,6 +49,7 @@ def _snippet(text: str, limit: int = 220) -> str:
 
 
 def print_chunk_results(results: list[dict]) -> None:
+    # Красиво печатаем хиты chunk-based поиска.
     print("\n=== CHUNK-BASED RESULTS ===")
     if not results:
         print("No results")
@@ -57,6 +61,7 @@ def print_chunk_results(results: list[dict]) -> None:
 
 
 def print_entity_results(results: list[dict]) -> None:
+    # Красиво печатаем хиты entity-based поиска.
     print("\n=== ENTITY-BASED RESULTS (TF-IDF, not entity graph) ===")
     if not results:
         print("No results")
@@ -70,6 +75,7 @@ def print_entity_results(results: list[dict]) -> None:
 
 
 def main() -> None:
+    # Полный демо-сценарий: поиск, вывод двух стратегий, вывод финального ответа.
     args = parse_args()
     pipeline = RAGPipeline()
 
@@ -89,6 +95,7 @@ def main() -> None:
 
     if args.plot_chunks:
         try:
+            # Опциональный график релевантности чанков для презентации.
             plot_path = Path(args.plot_path)
             plot_path.parent.mkdir(parents=True, exist_ok=True)
             pipeline.chunk_engine.visualize_search(args.query, top_k=args.top_k, save_path=str(plot_path))
@@ -102,3 +109,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

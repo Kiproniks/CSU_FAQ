@@ -1,0 +1,128 @@
+﻿<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CSU FAQ</title>
+  <style>
+    :root {
+      --bg: #f1f5f9;
+      --card: #ffffff;
+      --text: #0f172a;
+      --muted: #475569;
+      --accent: #0f766e;
+      --border: #cbd5e1;
+    }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%);
+      color: var(--text);
+    }
+    .wrap {
+      max-width: 900px;
+      margin: 24px auto;
+      padding: 0 16px 24px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    h1, h2 { margin: 0 0 12px; }
+    form { display: grid; gap: 10px; }
+    textarea, select, input, button {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      font-size: 14px;
+    }
+    button {
+      background: var(--accent);
+      color: #fff;
+      border: 0;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .muted { color: var(--muted); font-size: 13px; }
+    .error { color: #b91c1c; font-weight: 600; }
+    .answer { white-space: pre-wrap; line-height: 1.5; }
+    .hit {
+      border-top: 1px solid var(--border);
+      padding-top: 10px;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <!-- Шапка с активной LLM -->
+    <div class="card">
+      <h1>CSU FAQ</h1>
+      <div class="muted">LLM: {{ llm_provider }} / {{ llm_model }}</div>
+    </div>
+
+    <!-- Форма вопроса: запрос + режим + top-k -->
+    <div class="card">
+      <h2>Вопрос</h2>
+      <form method="post">
+        <textarea name="query" rows="4" placeholder="Введите вопрос...">{{ query }}</textarea>
+        <div class="grid">
+          <div>
+            <label for="mode">Режим:</label>
+            <select name="mode" id="mode">
+              <option value="chunk" {% if mode == "chunk" %}selected{% endif %}>ChunkBased</option>
+              <option value="entity" {% if mode == "entity" %}selected{% endif %}>EntityBased</option>
+            </select>
+          </div>
+          <div>
+            <label for="top_k">Top-K:</label>
+            <input type="number" min="1" max="20" id="top_k" name="top_k" value="{{ top_k }}">
+          </div>
+        </div>
+        <button type="submit">Спросить</button>
+      </form>
+      {% if error %}
+      <p class="error">{{ error }}</p>
+      {% endif %}
+    </div>
+
+    {% if result %}
+    <!-- Финальный сгенерированный ответ -->
+    <div class="card">
+      <h2>Ответ</h2>
+      <div class="answer">{{ result.answer }}</div>
+      <div class="muted">provider={{ result.provider }}, model={{ result.model }}, mode={{ result.mode }}</div>
+    </div>
+
+    <!-- Фрагменты поиска, использованные как фактическая основа ответа -->
+    <div class="card">
+      <h2>На чем основан ответ: {{ basis_label }}</h2>
+      {% if basis_hits %}
+        {% for hit in basis_hits %}
+        <div class="hit">
+          <strong>score={{ "%.4f"|format(hit.score) }}</strong> | {{ hit.source }}
+          {% if hit.entities %}
+          <div class="muted">entities: {{ ", ".join(hit.entities[:10]) }}</div>
+          {% endif %}
+          <div>{{ snippet(hit.text) }}</div>
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="muted">Подходящих фрагментов не найдено.</div>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+</body>
+</html>
+

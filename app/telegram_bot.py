@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 from aiogram import Bot, Dispatcher, F
@@ -8,9 +8,11 @@ from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup
 from app.config import settings
 from app.rag_pipeline import RAGPipeline
 
+# Единый экземпляр пайплайна и хранение режима для каждого чата.
 _pipeline: RAGPipeline | None = None
 _chat_modes: dict[int, str] = {}
 
+# Кнопки для пользователя и внутреннее сопоставление режимов.
 CHUNK_MODE_BUTTON = "ChunkBased"
 ENTITY_MODE_BUTTON = "EntityBased"
 MODE_BUTTONS = {
@@ -20,6 +22,7 @@ MODE_BUTTONS = {
 
 
 def get_pipeline() -> RAGPipeline:
+    # Ленивая инициализация для быстрого старта бота.
     global _pipeline
     if _pipeline is None:
         _pipeline = RAGPipeline()
@@ -27,6 +30,7 @@ def get_pipeline() -> RAGPipeline:
 
 
 def build_mode_keyboard() -> ReplyKeyboardMarkup:
+    # Постоянная клавиатура для быстрого переключения режима в чате.
     return ReplyKeyboardMarkup(
         keyboard=[
             [
@@ -40,14 +44,17 @@ def build_mode_keyboard() -> ReplyKeyboardMarkup:
 
 
 def get_chat_mode(chat_id: int) -> str:
+    # Для новых чатов по умолчанию используем режим chunk.
     return _chat_modes.get(chat_id, "chunk")
 
 
 def set_chat_mode(chat_id: int, mode: str) -> None:
+    # Сохраняем выбранный режим поиска для каждого чата/сессии.
     _chat_modes[chat_id] = mode
 
 
 def format_hits(hits: list[dict], limit: int = 5) -> str:
+    # Короткий список источников, добавляемый после ответа.
     if not hits:
         return ""
 
@@ -62,6 +69,7 @@ def format_hits(hits: list[dict], limit: int = 5) -> str:
 
 
 def _snippet(text: str, max_len: int = 420) -> str:
+    # Короткий фрагмент для fallback-сообщений.
     cleaned = " ".join((text or "").split())
     if len(cleaned) <= max_len:
         return cleaned
@@ -69,6 +77,7 @@ def _snippet(text: str, max_len: int = 420) -> str:
 
 
 def build_bot_answer(result: dict) -> str:
+    # Возвращаем ответ LLM или краткие фрагменты поиска в режиме echo.
     if result.get("provider") != "echo":
         return result.get("answer", "")
 
@@ -89,6 +98,7 @@ def build_bot_answer(result: dict) -> str:
 
 
 async def start_handler(message: Message) -> None:
+    # Сбрасываем режим на стандартный и показываем выбор режима.
     chat_id = message.chat.id
     set_chat_mode(chat_id, "chunk")
     await message.answer(
@@ -99,6 +109,7 @@ async def start_handler(message: Message) -> None:
 
 
 async def mode_handler(message: Message) -> None:
+    # Обработка нажатий кнопок режима.
     mode = MODE_BUTTONS.get((message.text or "").strip())
     if not mode:
         return
@@ -107,6 +118,7 @@ async def mode_handler(message: Message) -> None:
 
 
 async def question_handler(message: Message) -> None:
+    # Обрабатываем обычный текст как вопрос в текущем режиме чата.
     chat_id = message.chat.id
     question = (message.text or "").strip()
     if not question:
@@ -114,7 +126,7 @@ async def question_handler(message: Message) -> None:
         return
 
     mode = get_chat_mode(chat_id)
-    # First query may be slower because retrieval pipeline is initialized lazily.
+    # Первый запрос может быть медленнее, потому что пайплайн инициализируется лениво.
     await message.answer(f"Processing your question in {mode} mode...")
 
     try:
@@ -125,11 +137,12 @@ async def question_handler(message: Message) -> None:
 
     answer = build_bot_answer(result)
     response_text = f"Mode: {mode}\n\n{answer}{format_hits(result.get('hits', []))}"
-    # Telegram message hard limit is 4096 chars.
+    # Жесткий лимит сообщения Telegram — 4096 символов.
     await message.answer(response_text[:4000])
 
 
 async def main() -> None:
+    # Точка входа бота: проверка токена, регистрация хендлеров, запуск polling.
     if not settings.telegram_bot_token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is missing in .env")
 
@@ -147,3 +160,4 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
+
