@@ -1,5 +1,5 @@
 import unittest
-from Entity_Based import EntityBased
+from EntityBased.EntityBased import EntityBased
 
 class TestEntityBased(unittest.TestCase):
     
