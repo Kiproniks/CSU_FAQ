@@ -44,14 +44,18 @@ class EntityBased:
         return sorted_entities[:self.max_entities_per_chunk]
 
     def add_chunk(self, chunk: str, chunk_id: int = None) -> None:
-        """Добавление одного чанка"""
+        """Добавление чанка в базу данных."""
         if chunk_id is None:
             chunk_id = len(self.chunks)
 
-        self.chunks.append({'id': chunk_id, 'text': chunk})
-
         words = self._preprocess_text(chunk)
         entities = self._extract_entities(words)
+
+        self.chunks.append({
+            'id': chunk_id, 
+            'text': chunk,
+            'entities': entities          # ← добавили
+        })
 
         self.chunk_entities.append(entities)
 
