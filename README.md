@@ -47,6 +47,7 @@ Copy-Item .env.example .env
 - `ADMIN_WEB_PASSWORD=<ваш_пароль>`
 - `ADMIN_TELEGRAM_IDS=<chat_id_админа_через_запятую>`
 - `PUBLIC_BASE_URL=<публичный URL web, нужен для Telegram mini app /admin>`
+- `WEBAPP_URL=<полный URL mini app, например https://.../admin/mini>`
 - `USER_MONTHLY_REQUEST_LIMIT=100`
 - `ENTITY_CHUNK_SIZE`, `ENTITY_CHUNK_OVERLAP`, `ENTITY_MIN_LENGTH`, `ENTITY_MAX_ENTITIES_PER_CHUNK`,
   `ENTITY_TFIDF_WEIGHT`, `ENTITY_OVERLAP_WEIGHT`, `ENTITY_MIN_SCORE` (тонкая настройка EntityBased)
@@ -109,7 +110,7 @@ run_all.bat
 - `/start` — запуск и выбор режима.
 - `/token` — выдать токен пользователя.
 - `/verify <token>` — верификация пользователя.
-- `/admin` — открыть Telegram mini app админ-панели (только админ, нужен `PUBLIC_BASE_URL`).
+- `/admin` — открыть Telegram mini app админ-панели (только админ, нужен `WEBAPP_URL` или `PUBLIC_BASE_URL`).
 - `/admin_make_admin <source> <external_id>` — назначить админа.
 - `/admin_remove_admin <source> <external_id>` — снять админа.
 - `/admin_stats [days]` — активность запросов (только админ).

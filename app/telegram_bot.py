@@ -6,15 +6,20 @@ import os
 import threading
 import time
 import requests
+from urllib.parse import urlparse, urlencode, urlunparse, parse_qsl
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
 from aiogram.exceptions import TelegramNetworkError
 from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
     KeyboardButton,
     Message,
     ReplyKeyboardMarkup,
+    WebAppInfo,
 )
 
+from app.access_tokens import create_signed_payload
 from app.config import settings
 from app.db import get_database
 from app.rag_pipeline import RAGPipeline
@@ -128,8 +133,39 @@ def format_primary_hit(hits: list[dict]) -> str:
     return f"\n\nИсточник: {source}"
 
 
-def build_admin_help_text(public_base_url: str = "") -> str:
-    # /admin всегда отдает локальную ссылку по запросу пользователя.
+def _append_query_value(url: str, key: str, value: str) -> str:
+    # Добавляем query-параметр без потери существующих параметров.
+    parsed = urlparse(url)
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    query[key] = value
+    return urlunparse(parsed._replace(query=urlencode(query)))
+
+
+def build_admin_webapp_url(chat_id: int) -> str:
+    # Формируем mini-app URL и добавляем подписанный access для /admin/mini.
+    base_url = (settings.webapp_url or "").strip()
+    if not base_url:
+        return ""
+
+    access_token = create_signed_payload(
+        payload={"chat_id": int(chat_id), "scope": "mini_admin"},
+        secret=settings.web_secret_key,
+        ttl_sec=settings.mini_admin_ttl_sec,
+    )
+
+    if "{access}" in base_url:
+        return base_url.replace("{access}", access_token)
+    return _append_query_value(base_url, "access", access_token)
+
+
+def build_admin_help_text(chat_id: int) -> str:
+    # Текст /admin с URL и локальным fallback.
+    webapp_url = build_admin_webapp_url(chat_id)
+    if webapp_url:
+        return (
+            f"Админ-панель: {webapp_url}\n"
+            "Локальная ссылка (если открыт тот же ПК): http://127.0.0.1:8000/admin"
+        )
     return "Админ-панель: http://127.0.0.1:8000/admin"
 
 
@@ -222,6 +258,20 @@ def _reply_keyboard_payload() -> dict:
     }
 
 
+def _admin_webapp_reply_markup_payload(url: str) -> dict:
+    # Inline-кнопка Telegram WebApp для requests backend.
+    return {
+        "inline_keyboard": [
+            [
+                {
+                    "text": "Открыть админ-панель",
+                    "web_app": {"url": url},
+                }
+            ]
+        ]
+    }
+
+
 def _tg_api_url(method: str) -> str:
     return f"https://api.telegram.org/bot{settings.telegram_bot_token}/{method}"
 
@@ -269,12 +319,20 @@ def _sync_verify_handler(chat_id: int, text: str) -> None:
 
 
 def _sync_admin_handler(chat_id: int) -> None:
-    # /admin для requests-backend: просто ссылка на веб-админку.
+    # /admin для requests-backend: ссылка + WebApp-кнопка, если URL настроен.
     if not is_admin(chat_id):
         _tg_send_message(chat_id, "Access denied.")
         return
 
-    admin_text = build_admin_help_text()
+    admin_text = build_admin_help_text(chat_id)
+    webapp_url = build_admin_webapp_url(chat_id)
+    if webapp_url:
+        _tg_send_message(
+            chat_id,
+            admin_text,
+            reply_markup=_admin_webapp_reply_markup_payload(webapp_url),
+        )
+        return
     _tg_send_message(chat_id, admin_text)
 
 
@@ -713,12 +771,29 @@ async def unknown_command_handler(message: Message) -> None:
 
 
 async def admin_mini_handler(message: Message) -> None:
-    # /admin: просто ссылка на веб-админку.
+    # /admin: ссылка + WebApp-кнопка, если настроен публичный URL.
     if not is_admin(message.chat.id):
         await message.answer("Access denied.")
         return
 
-    admin_text = build_admin_help_text()
+    chat_id = int(message.chat.id)
+    admin_text = build_admin_help_text(chat_id)
+    webapp_url = build_admin_webapp_url(chat_id)
+
+    if webapp_url:
+        markup = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="Открыть админ-панель",
+                        web_app=WebAppInfo(url=webapp_url),
+                    )
+                ]
+            ]
+        )
+        await message.answer(admin_text, reply_markup=markup)
+        return
+
     await message.answer(admin_text)
 
 

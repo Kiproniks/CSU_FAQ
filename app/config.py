@@ -2,6 +2,7 @@
 
 import os
 from dataclasses import dataclass
+from urllib.parse import urlparse
 from dotenv import load_dotenv
 
 # Загружаем переменные окружения из .env один раз при импорте.
@@ -73,6 +74,7 @@ class Settings:
     admin_web_password: str = os.getenv("ADMIN_WEB_PASSWORD", "")
     admin_default_days: int = int(os.getenv("ADMIN_DEFAULT_DAYS", "14"))
     public_base_url: str = os.getenv("PUBLIC_BASE_URL", "").strip()
+    webapp_url: str = os.getenv("WEBAPP_URL", "").strip()
     mini_admin_ttl_sec: int = int(os.getenv("MINI_ADMIN_TTL_SEC", "900"))
     user_monthly_request_limit: int = int(os.getenv("USER_MONTHLY_REQUEST_LIMIT", "100"))
 
@@ -92,6 +94,15 @@ class Settings:
         self.chunk_splitter_mode = (self.chunk_splitter_mode or "smart").strip().lower() or "smart"
         self.chunk_mmr_lambda = max(0.0, min(1.0, float(self.chunk_mmr_lambda)))
         self.entity_mmr_lambda = max(0.0, min(1.0, float(self.entity_mmr_lambda)))
+        self.public_base_url = (self.public_base_url or "").strip().rstrip("/")
+        self.webapp_url = (self.webapp_url or "").strip()
+        if not self.webapp_url and self.public_base_url:
+            parsed = urlparse(self.public_base_url)
+            path = (parsed.path or "").rstrip("/")
+            if path.startswith("/admin"):
+                self.webapp_url = self.public_base_url
+            else:
+                self.webapp_url = f"{self.public_base_url}/admin/mini"
         self.admin_telegram_ids = _as_int_list(os.getenv("ADMIN_TELEGRAM_IDS", ""))
 
 

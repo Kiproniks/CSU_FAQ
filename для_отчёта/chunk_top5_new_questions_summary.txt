@@ -1,0 +1,14 @@
+Отчет: повторный тест top-5 настроек ChunkBased
+
+Источник top-5: C:\Users\1\Desktop\CSU_FAQ_clean\для_отчёта\chunk_settings_benchmark_part2.xlsx
+Новый набор вопросов: C:\Users\1\Desktop\CSU_FAQ_clean\data\benchmark_questions_new_chunks_20260322.json
+Количество вопросов: 30
+
+Итоги:
+- #1 s420_o70_k3_msm_mmr0.72 | chunk_size=420 overlap=70 top_k=3 splitter=smart mmr=0.72 | avg_score_10=8.469
+- #2 s480_o80_k3_msm_mmr0.74 | chunk_size=480 overlap=80 top_k=3 splitter=smart mmr=0.74 | avg_score_10=8.453
+- #3 s360_o60_k3_msm_mmr0.70 | chunk_size=360 overlap=60 top_k=3 splitter=smart mmr=0.70 | avg_score_10=8.431
+- #4 s520_o90_k3_msm_mmr0.76 | chunk_size=520 overlap=90 top_k=3 splitter=smart mmr=0.76 | avg_score_10=8.407
+- #5 s820_o130_k4_msm_mmr0.78 | chunk_size=820 overlap=130 top_k=4 splitter=smart mmr=0.78 | avg_score_10=8.394
+
+Примечание: оценка совпадения считается через semantic-judge из scripts/chunk_settings_benchmark.py
