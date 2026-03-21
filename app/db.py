@@ -55,7 +55,12 @@ class AnalyticsDB:
         if not self.enabled:
             return None
         try:
-            conn = psycopg.connect(self.dsn, autocommit=True, row_factory=dict_row)
+            conn = psycopg.connect(
+                self.dsn,
+                autocommit=True,
+                row_factory=dict_row,
+                connect_timeout=3,
+            )
             self._last_connection_ok = True
             return conn
         except Exception as exc:
@@ -530,6 +535,55 @@ class AnalyticsDB:
                 )
                 rows = cur.fetchall() or []
                 return [dict(row) for row in rows]
+
+    def get_user_with_stats(self, external_id: str, source: str) -> Optional[Dict[str, Any]]:
+        conn = self._connect()
+        if conn is None:
+            return None
+
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    WITH monthly_usage AS (
+                        SELECT user_id, COUNT(*)::INT AS month_requests
+                        FROM query_logs
+                        WHERE DATE_TRUNC('month', created_at) = DATE_TRUNC('month', NOW())
+                        GROUP BY user_id
+                    ),
+                    total_usage AS (
+                        SELECT user_id, COUNT(*)::INT AS total_requests, MAX(created_at) AS last_query_at
+                        FROM query_logs
+                        GROUP BY user_id
+                    ),
+                    active_tokens AS (
+                        SELECT user_id, COUNT(*)::INT AS active_tokens
+                        FROM user_tokens
+                        WHERE active = TRUE
+                        GROUP BY user_id
+                    )
+                    SELECT u.id,
+                           u.external_id,
+                           u.source,
+                           u.created_at,
+                           u.is_verified,
+                           u.is_admin,
+                           COALESCE(u.bonus_tokens, 0) AS bonus_tokens,
+                           COALESCE(mu.month_requests, 0) AS month_requests,
+                           COALESCE(tu.total_requests, 0) AS total_requests,
+                           COALESCE(at.active_tokens, 0) AS active_tokens,
+                           tu.last_query_at
+                    FROM users u
+                    LEFT JOIN monthly_usage mu ON mu.user_id = u.id
+                    LEFT JOIN total_usage tu ON tu.user_id = u.id
+                    LEFT JOIN active_tokens at ON at.user_id = u.id
+                    WHERE u.external_id = %s AND u.source = %s
+                    LIMIT 1;
+                    """,
+                    (str(external_id), str(source)),
+                )
+                row = cur.fetchone()
+                return dict(row) if row else None
 
     def monthly_usage(self, external_id: str, source: str) -> int:
         user_id = self.register_user(external_id=external_id, source=source)

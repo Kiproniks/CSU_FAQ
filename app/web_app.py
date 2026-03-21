@@ -1,6 +1,8 @@
 ﻿from __future__ import annotations
 
+import concurrent.futures
 import json
+import threading
 import time
 import uuid
 from typing import Any
@@ -17,6 +19,9 @@ from app.source_attribution import SourceAttributionFormatter
 app = Flask(__name__)
 app.secret_key = settings.web_secret_key
 _pipeline: RAGPipeline | None = None
+_pipeline_lock = threading.Lock()
+_pipeline_ready = threading.Event()
+ANSWER_TIMEOUT_SEC = 45
 
 
 # -------------------------
@@ -27,8 +32,15 @@ def get_pipeline() -> RAGPipeline:
     # Создаем пайплайн один раз, чтобы не переинициализировать индексы на каждый запрос.
     global _pipeline
     if _pipeline is None:
-        _pipeline = RAGPipeline()
+        with _pipeline_lock:
+            if _pipeline is None:
+                _pipeline = RAGPipeline()
+                _pipeline_ready.set()
     return _pipeline
+
+
+def is_pipeline_ready() -> bool:
+    return _pipeline_ready.is_set()
 
 
 def _snippet(text: str, limit: int = 260) -> str:
@@ -124,6 +136,29 @@ def _parse_days(raw_value: str | None) -> int:
         return settings.admin_default_days
 
 
+def _normalize_user_source(raw: str, *, allow_guest: bool = False) -> str:
+    value = (raw or "").strip().lower()
+    allowed = {"telegram", "web"}
+    if allow_guest:
+        allowed.add("web_guest")
+    if value in allowed:
+        return value
+    return "telegram"
+
+
+def _answer_with_timeout(query: str, mode: str) -> dict[str, Any]:
+    # Не даем зависать запросу слишком долго: при timeout не ждем завершения фонового потока.
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(get_pipeline().answer, query=query, top_k=1, mode=mode)
+    try:
+        return future.result(timeout=ANSWER_TIMEOUT_SEC)
+    except concurrent.futures.TimeoutError:
+        future.cancel()
+        raise
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
 def _current_identity() -> tuple[str, str, bool, dict[str, Any] | None]:
     """Возвращает identity для логирования/квот: (external_id, source, set_cookie, auth_user)."""
     auth_user = _get_session_user()
@@ -158,7 +193,15 @@ def _get_mini_claims() -> dict[str, Any] | None:
     }
 
 
-def _render_admin_dashboard(days: int, *, mini_claims: dict[str, Any] | None = None) -> str:
+def _render_admin_dashboard(
+    days: int,
+    *,
+    mini_claims: dict[str, Any] | None = None,
+    lookup_external_id: str = "",
+    lookup_source: str = "telegram",
+    lookup_user: dict[str, Any] | None = None,
+    lookup_error: str = "",
+) -> str:
     db = get_database()
     activity = db.activity_series(days=days)
     new_users = db.new_users_series(days=days)
@@ -184,8 +227,13 @@ def _render_admin_dashboard(days: int, *, mini_claims: dict[str, Any] | None = N
         issue_token_url=url_for("admin_mini_issue_token") if is_mini else url_for("admin_issue_token"),
         user_role_url=url_for("admin_mini_user_role") if is_mini else url_for("admin_user_role"),
         quota_action_url=url_for("admin_mini_quota_tokens") if is_mini else url_for("admin_quota_tokens"),
+        user_lookup_url=url_for("admin_mini_user_lookup") if is_mini else url_for("admin_user_lookup"),
         create_user_url=url_for("admin_mini_create_web_user") if is_mini else url_for("admin_create_web_user"),
         dashboard_url=url_for("admin_mini_dashboard") if is_mini else url_for("admin_dashboard"),
+        lookup_external_id=lookup_external_id,
+        lookup_source=lookup_source,
+        lookup_user=lookup_user,
+        lookup_error=lookup_error,
         logout_url=("" if is_mini else url_for("auth_logout")),
         back_url=url_for("index"),
     )
@@ -230,11 +278,13 @@ def index() -> str:
                 f"Лимит исчерпан: {quota.get('used', 0)} / {quota.get('limit', settings.user_monthly_request_limit)} "
                 "запросов в этом месяце."
             )
+        elif not is_pipeline_ready():
+            error = "Сервис прогревается. Повторите вопрос через 10-20 секунд."
         else:
             try:
                 # Основной вызов пайплайна поиска и генерации.
                 started = time.perf_counter()
-                result = get_pipeline().answer(query=query, top_k=1, mode=mode)
+                result = _answer_with_timeout(query=query, mode=mode)
                 latency_ms = int((time.perf_counter() - started) * 1000)
                 generated_answer = str(result.get("answer", "") or "").strip()
 
@@ -253,6 +303,8 @@ def index() -> str:
                     source=source,
                     monthly_limit=settings.user_monthly_request_limit,
                 )
+            except concurrent.futures.TimeoutError:
+                error = f"Ответ формируется слишком долго (>{ANSWER_TIMEOUT_SEC} сек). Попробуйте повторить."
             except Exception as exc:
                 error = f"Ошибка пайплайна: {exc}"
 
@@ -426,7 +478,22 @@ def admin_dashboard() -> str:
         return access
 
     days = _parse_days(request.args.get("days"))
-    return _render_admin_dashboard(days=days)
+    lookup_external_id = (request.args.get("lookup_external_id") or "").strip()
+    lookup_source = _normalize_user_source(request.args.get("lookup_source") or "telegram")
+    lookup_user = None
+    lookup_error = ""
+    if lookup_external_id:
+        lookup_user = get_database().get_user_with_stats(external_id=lookup_external_id, source=lookup_source)
+        if not lookup_user:
+            lookup_error = f"Пользователь не найден: {lookup_source}:{lookup_external_id}"
+
+    return _render_admin_dashboard(
+        days=days,
+        lookup_external_id=lookup_external_id,
+        lookup_source=lookup_source,
+        lookup_user=lookup_user,
+        lookup_error=lookup_error,
+    )
 
 
 @app.route("/admin/token_action", methods=["POST"])
@@ -453,12 +520,23 @@ def admin_issue_token() -> str:
         return access
 
     external_id = (request.form.get("external_id") or "").strip()
-    source = (request.form.get("source") or "web").strip().lower() or "web"
+    source = _normalize_user_source(request.form.get("source") or "web")
+    lookup_external_id = (request.form.get("lookup_external_id") or "").strip()
+    lookup_source = _normalize_user_source(request.form.get("lookup_source") or "telegram")
 
-    if external_id:
+    if external_id and source in {"telegram", "web"}:
         get_database().issue_token(external_id=external_id, source=source)
 
     days = _parse_days(request.form.get("days"))
+    if lookup_external_id:
+        return redirect(
+            url_for(
+                "admin_dashboard",
+                days=days,
+                lookup_external_id=lookup_external_id,
+                lookup_source=lookup_source,
+            )
+        )
     return redirect(url_for("admin_dashboard", days=days))
 
 
@@ -486,21 +564,51 @@ def admin_quota_tokens() -> str:
         return access
 
     external_id = (request.form.get("external_id") or "").strip()
-    source = (request.form.get("source") or "").strip()
+    source = _normalize_user_source(request.form.get("source") or "telegram")
     action = (request.form.get("action") or "").strip().lower()
     raw_amount = (request.form.get("amount") or "").strip()
+    lookup_external_id = (request.form.get("lookup_external_id") or "").strip()
+    lookup_source = _normalize_user_source(request.form.get("lookup_source") or "telegram")
 
     try:
         amount = int(raw_amount)
     except ValueError:
         amount = 0
 
-    if external_id and source and amount > 0 and action in {"add", "take"}:
+    if external_id and source in {"telegram", "web"} and amount > 0 and action in {"add", "take"}:
         delta = amount if action == "add" else -amount
         get_database().adjust_user_bonus_tokens(external_id=external_id, source=source, delta=delta)
 
     days = _parse_days(request.form.get("days"))
+    if lookup_external_id:
+        return redirect(
+            url_for(
+                "admin_dashboard",
+                days=days,
+                lookup_external_id=lookup_external_id,
+                lookup_source=lookup_source,
+            )
+        )
     return redirect(url_for("admin_dashboard", days=days))
+
+
+@app.route("/admin/user_lookup", methods=["POST"])
+def admin_user_lookup() -> str:
+    access = _require_admin()
+    if access is not None:
+        return access
+
+    days = _parse_days(request.form.get("days"))
+    external_id = (request.form.get("external_id") or "").strip()
+    source = _normalize_user_source(request.form.get("source") or "telegram")
+    return redirect(
+        url_for(
+            "admin_dashboard",
+            days=days,
+            lookup_external_id=external_id,
+            lookup_source=source,
+        )
+    )
 
 
 @app.route("/admin/create_web_user", methods=["POST"])
@@ -537,7 +645,23 @@ def admin_mini_dashboard() -> str:
         abort(403)
 
     days = _parse_days(request.args.get("days"))
-    return _render_admin_dashboard(days=days, mini_claims=claims)
+    lookup_external_id = (request.args.get("lookup_external_id") or "").strip()
+    lookup_source = _normalize_user_source(request.args.get("lookup_source") or "telegram")
+    lookup_user = None
+    lookup_error = ""
+    if lookup_external_id:
+        lookup_user = get_database().get_user_with_stats(external_id=lookup_external_id, source=lookup_source)
+        if not lookup_user:
+            lookup_error = f"Пользователь не найден: {lookup_source}:{lookup_external_id}"
+
+    return _render_admin_dashboard(
+        days=days,
+        mini_claims=claims,
+        lookup_external_id=lookup_external_id,
+        lookup_source=lookup_source,
+        lookup_user=lookup_user,
+        lookup_error=lookup_error,
+    )
 
 
 @app.route("/admin/mini/token_action", methods=["POST"])
@@ -564,12 +688,24 @@ def admin_mini_issue_token() -> str:
         abort(403)
 
     external_id = (request.form.get("external_id") or "").strip()
-    source = (request.form.get("source") or "web").strip().lower() or "web"
+    source = _normalize_user_source(request.form.get("source") or "web")
+    lookup_external_id = (request.form.get("lookup_external_id") or "").strip()
+    lookup_source = _normalize_user_source(request.form.get("lookup_source") or "telegram")
 
-    if external_id:
+    if external_id and source in {"telegram", "web"}:
         get_database().issue_token(external_id=external_id, source=source)
 
     days = _parse_days(request.form.get("days"))
+    if lookup_external_id:
+        return redirect(
+            url_for(
+                "admin_mini_dashboard",
+                access=claims["access"],
+                days=days,
+                lookup_external_id=lookup_external_id,
+                lookup_source=lookup_source,
+            )
+        )
     return redirect(url_for("admin_mini_dashboard", access=claims["access"], days=days))
 
 
@@ -597,21 +733,53 @@ def admin_mini_quota_tokens() -> str:
         abort(403)
 
     external_id = (request.form.get("external_id") or "").strip()
-    source = (request.form.get("source") or "").strip()
+    source = _normalize_user_source(request.form.get("source") or "telegram")
     action = (request.form.get("action") or "").strip().lower()
     raw_amount = (request.form.get("amount") or "").strip()
+    lookup_external_id = (request.form.get("lookup_external_id") or "").strip()
+    lookup_source = _normalize_user_source(request.form.get("lookup_source") or "telegram")
 
     try:
         amount = int(raw_amount)
     except ValueError:
         amount = 0
 
-    if external_id and source and amount > 0 and action in {"add", "take"}:
+    if external_id and source in {"telegram", "web"} and amount > 0 and action in {"add", "take"}:
         delta = amount if action == "add" else -amount
         get_database().adjust_user_bonus_tokens(external_id=external_id, source=source, delta=delta)
 
     days = _parse_days(request.form.get("days"))
+    if lookup_external_id:
+        return redirect(
+            url_for(
+                "admin_mini_dashboard",
+                access=claims["access"],
+                days=days,
+                lookup_external_id=lookup_external_id,
+                lookup_source=lookup_source,
+            )
+        )
     return redirect(url_for("admin_mini_dashboard", access=claims["access"], days=days))
+
+
+@app.route("/admin/mini/user_lookup", methods=["POST"])
+def admin_mini_user_lookup() -> str:
+    claims = _get_mini_claims()
+    if not claims:
+        abort(403)
+
+    days = _parse_days(request.form.get("days"))
+    external_id = (request.form.get("external_id") or "").strip()
+    source = _normalize_user_source(request.form.get("source") or "telegram")
+    return redirect(
+        url_for(
+            "admin_mini_dashboard",
+            access=claims["access"],
+            days=days,
+            lookup_external_id=external_id,
+            lookup_source=source,
+        )
+    )
 
 
 @app.route("/admin/mini/create_web_user", methods=["POST"])

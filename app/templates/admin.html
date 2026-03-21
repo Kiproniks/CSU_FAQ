@@ -106,30 +106,14 @@
     </div>
 
     <div class="card">
-      <h3>Выдать токен пользователю</h3>
-      <form method="post" action="{{ issue_token_url }}">
-        <input name="external_id" placeholder="external_id (например chat_id или username)" style="min-width: 280px;" required>
-        <select name="source">
-          <option value="telegram">telegram</option>
-          <option value="web">web</option>
-          <option value="web_guest">web_guest</option>
-        </select>
-        <input type="hidden" name="days" value="{{ days }}">
-        {% if access_token %}<input type="hidden" name="access" value="{{ access_token }}">{% endif %}
-        <button type="submit">Выдать токен</button>
-      </form>
-    </div>
-
-    <div class="card">
-      <h3>Изменить бонусные токены (месячная квота)</h3>
+      <h3>Изменить колличество токенов</h3>
       <form method="post" action="{{ quota_action_url }}">
-        <input name="external_id" placeholder="external_id" style="min-width: 220px;" required>
+        <input name="external_id" placeholder="external_id (chat_id или username)" style="min-width: 240px;" required>
         <select name="source">
           <option value="telegram">telegram</option>
           <option value="web">web</option>
-          <option value="web_guest">web_guest</option>
         </select>
-        <input name="amount" type="number" min="1" step="1" placeholder="amount" style="width: 120px;" required>
+        <input name="amount" type="number" min="1" step="1" placeholder="кол-во токенов" style="width: 140px;" required>
         <select name="action">
           <option value="add">добавить</option>
           <option value="take">забрать</option>
@@ -138,6 +122,69 @@
         {% if access_token %}<input type="hidden" name="access" value="{{ access_token }}">{% endif %}
         <button type="submit">Применить</button>
       </form>
+    </div>
+
+    <div class="card">
+      <h3>Найти пользователя по ID</h3>
+      <form method="post" action="{{ user_lookup_url }}">
+        <input name="external_id" placeholder="external_id (chat_id или username)" style="min-width: 280px;" value="{{ lookup_external_id }}" required>
+        <select name="source">
+          <option value="telegram" {% if lookup_source == "telegram" %}selected{% endif %}>telegram</option>
+          <option value="web" {% if lookup_source == "web" %}selected{% endif %}>web</option>
+        </select>
+        <input type="hidden" name="days" value="{{ days }}">
+        {% if access_token %}<input type="hidden" name="access" value="{{ access_token }}">{% endif %}
+        <button type="submit">Найти</button>
+      </form>
+
+      {% if lookup_error %}
+        <div style="margin-top:10px;color:#b91c1c;font-weight:600;">{{ lookup_error }}</div>
+      {% endif %}
+
+      {% if lookup_user %}
+        <div style="margin-top:10px;"><strong>Пользователь найден:</strong> <code>{{ lookup_user.external_id }}</code> ({{ lookup_user.source }})</div>
+        <table style="margin-top:10px;">
+          <tbody>
+            <tr><th>Внутренний id</th><td>{{ lookup_user.id }}</td></tr>
+            <tr><th>Роль</th><td>{% if lookup_user.is_admin %}<span class="admin-badge">admin</span>{% else %}user{% endif %}</td></tr>
+            <tr><th>Верификация</th><td>{{ "yes" if lookup_user.is_verified else "no" }}</td></tr>
+            <tr><th>Создан</th><td>{{ lookup_user.created_at }}</td></tr>
+            <tr><th>Последний запрос</th><td>{{ lookup_user.last_query_at or "-" }}</td></tr>
+            <tr><th>Запросов за месяц</th><td>{{ lookup_user.month_requests }}</td></tr>
+            <tr><th>Запросов всего</th><td>{{ lookup_user.total_requests }}</td></tr>
+            <tr><th>Бонусные токены</th><td>{{ lookup_user.bonus_tokens }}</td></tr>
+            <tr><th>Активных токенов</th><td>{{ lookup_user.active_tokens }}</td></tr>
+            <tr><th>Эффективный лимит</th><td>{% if lookup_user.is_admin %}unlimited{% else %}{{ monthly_limit + lookup_user.bonus_tokens }}{% endif %}</td></tr>
+          </tbody>
+        </table>
+
+        <div style="margin-top:10px; display:grid; gap:10px;">
+          <form method="post" action="{{ issue_token_url }}">
+            <input type="hidden" name="external_id" value="{{ lookup_user.external_id }}">
+            <input type="hidden" name="source" value="{{ lookup_user.source }}">
+            <input type="hidden" name="lookup_external_id" value="{{ lookup_user.external_id }}">
+            <input type="hidden" name="lookup_source" value="{{ lookup_user.source }}">
+            <input type="hidden" name="days" value="{{ days }}">
+            {% if access_token %}<input type="hidden" name="access" value="{{ access_token }}">{% endif %}
+            <button type="submit">Выдать токен найденному пользователю</button>
+          </form>
+
+          <form method="post" action="{{ quota_action_url }}">
+            <input type="hidden" name="external_id" value="{{ lookup_user.external_id }}">
+            <input type="hidden" name="source" value="{{ lookup_user.source }}">
+            <input type="hidden" name="lookup_external_id" value="{{ lookup_user.external_id }}">
+            <input type="hidden" name="lookup_source" value="{{ lookup_user.source }}">
+            <input name="amount" type="number" min="1" step="1" placeholder="кол-во токенов" style="width: 140px;" required>
+            <select name="action">
+              <option value="add">добавить</option>
+              <option value="take">забрать</option>
+            </select>
+            <input type="hidden" name="days" value="{{ days }}">
+            {% if access_token %}<input type="hidden" name="access" value="{{ access_token }}">{% endif %}
+            <button type="submit">Изменить токены найденного пользователя</button>
+          </form>
+        </div>
+      {% endif %}
     </div>
 
     <div class="card">

@@ -65,6 +65,7 @@ class ChunkBased:
             sublinear_tf=True,
         )
         self._sparse_matrix = None
+        self._sparse_disabled = False
 
         self.client = chromadb.PersistentClient(path=chroma_path)
         self.embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
@@ -232,6 +233,7 @@ class ChunkBased:
 
     def _mark_sparse_dirty(self) -> None:
         self._sparse_matrix = None
+        self._sparse_disabled = False
 
     def _rebuild_doc_chunk_index_map(self) -> None:
         self._doc_chunk_index_map.clear()
@@ -350,11 +352,18 @@ class ChunkBased:
     def _ensure_sparse_index(self) -> None:
         if self._sparse_matrix is not None:
             return
+        if self._sparse_disabled:
+            return
         if not self.chunks:
             self._sparse_matrix = None
             return
         corpus = [str(item.get("text", "") or "") for item in self.chunks]
-        self._sparse_matrix = self._sparse_vectorizer.fit_transform(corpus)
+        try:
+            self._sparse_matrix = self._sparse_vectorizer.fit_transform(corpus)
+        except ValueError:
+            # Бывает пустой словарь TF-IDF на "грязных" данных: оставляем только dense retrieval.
+            self._sparse_matrix = None
+            self._sparse_disabled = True
 
     def _inject_neighbor_candidates(self, candidates: Dict[str, Dict], limit_seed: int = 12) -> None:
         if not candidates:
@@ -647,6 +656,7 @@ class ChunkBased:
         self._chunk_by_id.clear()
         self._doc_chunk_index_map.clear()
         self._sparse_matrix = None
+        self._sparse_disabled = False
 
     def visualize_search(self, query: str, top_k: int = 5, save_path: str = "search_visualization.png") -> None:
         results = self.search(query, top_k)

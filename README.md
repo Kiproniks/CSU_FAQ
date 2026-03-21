@@ -40,7 +40,8 @@ Copy-Item .env.example .env
 Минимум заполнить:
 - `TELEGRAM_BOT_TOKEN` — токен бота.
 - `LLM_PROVIDER=ollama`
-- `LLM_MODEL=qwen2.5:7b-instruct`
+- `LLM_MODEL=llama3.2:2b`
+- `OLLAMA_BASE_URL=http://127.0.0.1:11434`
 - `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/csu_faq`
 - `WEB_ADMIN_USERNAME=kiproniks`
 - `ADMIN_WEB_PASSWORD=<ваш_пароль>`
@@ -62,8 +63,9 @@ Copy-Item .env.example .env
 
 ## Ollama
 ```powershell
-ollama pull qwen2.5:7b-instruct
-ollama run qwen2.5:7b-instruct "Привет"
+ollama pull llama3.2
+ollama cp llama3.2:latest llama3.2:2b
+ollama run llama3.2:2b "Привет"
 ```
 
 ## PostgreSQL
@@ -93,6 +95,15 @@ python run_web.py
 ```powershell
 python run_bot.py
 ```
+
+## Стабильный запуск (рекомендуется)
+```powershell
+run_all.bat
+```
+- поднимает `ollama serve` (если не запущен),
+- запускает web + tg бота,
+- перезапускает их при падении,
+- пишет логи в папку `logs`.
 
 Команды:
 - `/start` — запуск и выбор режима.
@@ -147,6 +158,6 @@ PNG графики появятся в `data/chunk_size_lab/plots`.
 ## Диагностика LLM
 ```powershell
 python -c "from app.config import settings; print(settings.llm_provider, settings.llm_model, settings.ollama_base_url)"
-python -c "import requests; print(requests.get('http://localhost:11434/api/tags', timeout=5).status_code)"
+python -c "import requests; print(requests.get('http://127.0.0.1:11434/api/tags', timeout=5).status_code)"
 ```
 Если не `200`, проверь запуск Ollama и прокси.

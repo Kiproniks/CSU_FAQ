@@ -1,7 +1,9 @@
 ﻿from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import os
+import threading
 import time
 import requests
 from aiogram import Bot, Dispatcher, F
@@ -20,6 +22,8 @@ from app.source_attribution import SourceAttributionFormatter
 
 # Единый экземпляр пайплайна и хранение режима для каждого чата.
 _pipeline: RAGPipeline | None = None
+_pipeline_lock = threading.Lock()
+_pipeline_ready = threading.Event()
 _chat_modes: dict[int, str] = {}
 
 # Кнопки для пользователя и внутреннее сопоставление режимов.
@@ -35,14 +39,43 @@ REQUESTS_POLL_TIMEOUT_SEC = 30
 FAQ_ANSWER_MAX_LEN = 220
 FAQ_MESSAGE_MAX_LEN = 3900
 VERIFICATION_DISABLED_TEXT = "Верификация отключена: токены больше не требуются."
+ANSWER_TIMEOUT_SEC = 45
 
 
 def get_pipeline() -> RAGPipeline:
     # Ленивая инициализация для быстрого старта бота.
     global _pipeline
     if _pipeline is None:
-        _pipeline = RAGPipeline()
+        with _pipeline_lock:
+            if _pipeline is None:
+                _pipeline = RAGPipeline()
+                _pipeline_ready.set()
     return _pipeline
+
+
+def is_pipeline_ready() -> bool:
+    return _pipeline_ready.is_set()
+
+
+def _answer_sync_with_timeout(question: str, mode: str) -> dict:
+    # Защита requests-backend от подвисания пайплайна.
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(get_pipeline().answer, query=question, top_k=1, mode=mode)
+    try:
+        return future.result(timeout=ANSWER_TIMEOUT_SEC)
+    except concurrent.futures.TimeoutError:
+        future.cancel()
+        raise
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
+async def _answer_async_with_timeout(question: str, mode: str) -> dict:
+    # Защита aiogram-backend от долгого ответа пайплайна.
+    return await asyncio.wait_for(
+        asyncio.to_thread(lambda: get_pipeline().answer(question, top_k=1, mode=mode)),
+        timeout=ANSWER_TIMEOUT_SEC,
+    )
 
 
 def get_db():
@@ -73,9 +106,9 @@ def build_mode_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
-def get_chat_mode(chat_id: int) -> str:
-    # Для новых чатов по умолчанию используем режим chunk.
-    return _chat_modes.get(chat_id, "chunk")
+def get_chat_mode(chat_id: int) -> str | None:
+    # Режим считается выбранным только после явного нажатия кнопки.
+    return _chat_modes.get(chat_id)
 
 
 def set_chat_mode(chat_id: int, mode: str) -> None:
@@ -160,7 +193,7 @@ def _parse_source_external(text: str) -> tuple[str, str] | None:
         return None
     source = parts[1].strip().lower()
     external_id = parts[2].strip()
-    if not source or not external_id:
+    if source not in {"telegram", "web"} or not external_id:
         return None
     return source, external_id
 
@@ -176,7 +209,7 @@ def _parse_source_external_amount(text: str) -> tuple[str, str, int] | None:
         amount = int(parts[3].strip())
     except ValueError:
         return None
-    if not source or not external_id or amount <= 0:
+    if source not in {"telegram", "web"} or not external_id or amount <= 0:
         return None
     return source, external_id, amount
 
@@ -205,7 +238,7 @@ def _tg_send_message(chat_id: int, text: str, reply_markup: dict | None = None) 
 
 
 def _sync_start_handler(chat_id: int) -> None:
-    set_chat_mode(chat_id, "chunk")
+    _chat_modes.pop(chat_id, None)
     db = get_db()
     db.register_user(external_id=str(chat_id), source="telegram")
 
@@ -218,7 +251,7 @@ def _sync_start_handler(chat_id: int) -> None:
     _tg_send_message(
         chat_id,
         "Select answer mode, then send your question.\n"
-        "Current mode: ChunkBased.\n\n"
+        "Current mode: not selected.\n\n"
         "Useful commands:\n"
         "/admin - admin panel link\n"
         "/faq - show FAQ with answers\n"
@@ -430,6 +463,13 @@ def _sync_admin_take_tokens_handler(chat_id: int, text: str) -> None:
 
 def _sync_question_handler(chat_id: int, question: str) -> None:
     mode = get_chat_mode(chat_id)
+    if mode not in {"chunk", "entity"}:
+        _tg_send_message(chat_id, "Выберите режим и задайте вопрос")
+        return
+    if not is_pipeline_ready():
+        _tg_send_message(chat_id, "Сервис прогревается. Повторите вопрос через 10-20 секунд.")
+        return
+
     db = get_db()
     db.register_user(external_id=str(chat_id), source="telegram")
     if is_admin(chat_id):
@@ -451,7 +491,7 @@ def _sync_question_handler(chat_id: int, question: str) -> None:
 
     try:
         started = time.perf_counter()
-        result = get_pipeline().answer(question, mode=mode)
+        result = _answer_sync_with_timeout(question, mode)
         latency_ms = int((time.perf_counter() - started) * 1000)
         answer = build_bot_answer(result)
 
@@ -465,6 +505,9 @@ def _sync_question_handler(chat_id: int, question: str) -> None:
             model=result.get("model", ""),
             latency_ms=latency_ms,
         )
+    except concurrent.futures.TimeoutError:
+        _tg_send_message(chat_id, f"Превышено время ожидания ответа ({ANSWER_TIMEOUT_SEC} сек). Попробуйте еще раз.")
+        return
     except Exception as exc:
         _tg_send_message(chat_id, f"Processing error: {exc}")
         return
@@ -475,7 +518,7 @@ def _sync_question_handler(chat_id: int, question: str) -> None:
 
 
 def _sync_faq_handler(chat_id: int) -> None:
-    mode = get_chat_mode(chat_id)
+    mode = get_chat_mode(chat_id) or "chunk"
     _tg_send_message(chat_id, build_faq_text(mode=mode), reply_markup=_reply_keyboard_payload())
 
 
@@ -492,7 +535,7 @@ def _handle_text_update_sync(chat_id: int, text: str) -> None:
         mode = MODE_BUTTONS[raw]
         set_chat_mode(chat_id, mode)
         _tg_send_message(chat_id, f"Mode switched to: {raw}")
-        _tg_send_message(chat_id, "вы можете задать свой вопрос")
+        _tg_send_message(chat_id, "Вы можете задать свой вопрос")
         return
     if raw == FAQ_BUTTON:
         _sync_faq_handler(chat_id)
@@ -501,12 +544,12 @@ def _handle_text_update_sync(chat_id: int, text: str) -> None:
     if command in {"/chunk", "/chunkbased"}:
         set_chat_mode(chat_id, "chunk")
         _tg_send_message(chat_id, "Mode switched to: ChunkBased")
-        _tg_send_message(chat_id, "вы можете задать свой вопрос")
+        _tg_send_message(chat_id, "Вы можете задать свой вопрос")
         return
     if command in {"/entity", "/entitybased"}:
         set_chat_mode(chat_id, "entity")
         _tg_send_message(chat_id, "Mode switched to: EntityBased")
-        _tg_send_message(chat_id, "вы можете задать свой вопрос")
+        _tg_send_message(chat_id, "Вы можете задать свой вопрос")
         return
 
     if command == "/start":
@@ -552,7 +595,7 @@ def _handle_text_update_sync(chat_id: int, text: str) -> None:
         _sync_faq_handler(chat_id)
         return
     if command.startswith("/"):
-        _tg_send_message(chat_id, "Unknown command. Use /start.")
+        _tg_send_message(chat_id, "Выберите режим и задайте вопрос")
         return
 
     _sync_question_handler(chat_id, raw)
@@ -618,7 +661,7 @@ async def _probe_aiogram_transport() -> bool:
 async def start_handler(message: Message) -> None:
     # Сбрасываем режим на стандартный и показываем выбор режима.
     chat_id = message.chat.id
-    set_chat_mode(chat_id, "chunk")
+    _chat_modes.pop(chat_id, None)
 
     db = get_db()
     db.register_user(external_id=str(chat_id), source="telegram")
@@ -630,7 +673,7 @@ async def start_handler(message: Message) -> None:
 
     await message.answer(
         "Select answer mode, then send your question.\n"
-        "Current mode: ChunkBased.\n\n"
+        "Current mode: not selected.\n\n"
         "Useful commands:\n"
         "/admin - admin panel link\n"
         "/faq - show FAQ with answers\n"
@@ -646,12 +689,12 @@ async def mode_handler(message: Message) -> None:
         return
     set_chat_mode(message.chat.id, mode)
     await message.answer(f"Mode switched to: {message.text}")
-    await message.answer("вы можете задать свой вопрос")
+    await message.answer("Вы можете задать свой вопрос")
 
 
 async def faq_handler(message: Message) -> None:
     # Показ FAQ с кратким ответом по каждому вопросу.
-    mode = get_chat_mode(message.chat.id)
+    mode = get_chat_mode(message.chat.id) or "chunk"
     text = await asyncio.to_thread(build_faq_text, 100, 10, mode)
     await message.answer(text[:4000])
 
@@ -662,6 +705,11 @@ async def token_handler(message: Message) -> None:
 
 async def verify_handler(message: Message) -> None:
     await message.answer(VERIFICATION_DISABLED_TEXT)
+
+
+async def unknown_command_handler(message: Message) -> None:
+    # Для любых неизвестных команд не оставляем пользователя без понятного шага.
+    await message.answer("Выберите режим и задайте вопрос")
 
 
 async def admin_mini_handler(message: Message) -> None:
@@ -866,6 +914,13 @@ async def question_handler(message: Message) -> None:
         return
 
     mode = get_chat_mode(chat_id)
+    if mode not in {"chunk", "entity"}:
+        await message.answer("Выберите режим и задайте вопрос")
+        return
+    if not is_pipeline_ready():
+        await message.answer("Сервис прогревается. Повторите вопрос через 10-20 секунд.")
+        return
+
     db = get_db()
     db.register_user(external_id=str(chat_id), source="telegram")
     if is_admin(chat_id):
@@ -887,7 +942,7 @@ async def question_handler(message: Message) -> None:
 
     try:
         started = time.perf_counter()
-        result = await asyncio.to_thread(lambda: get_pipeline().answer(question, mode=mode))
+        result = await _answer_async_with_timeout(question, mode)
         latency_ms = int((time.perf_counter() - started) * 1000)
         answer = build_bot_answer(result)
 
@@ -901,6 +956,9 @@ async def question_handler(message: Message) -> None:
             model=result.get("model", ""),
             latency_ms=latency_ms,
         )
+    except asyncio.TimeoutError:
+        await message.answer(f"Превышено время ожидания ответа ({ANSWER_TIMEOUT_SEC} сек). Попробуйте еще раз.")
+        return
     except Exception as exc:
         await message.answer(f"Processing error: {exc}")
         return
@@ -945,6 +1003,7 @@ async def main() -> None:
     dp.message.register(admin_remove_admin_handler, Command("admin_remove_admin"))
     dp.message.register(admin_add_tokens_handler, Command("admin_add_tokens"))
     dp.message.register(admin_take_tokens_handler, Command("admin_take_tokens"))
+    dp.message.register(unknown_command_handler, F.text.startswith("/"))
 
     dp.message.register(faq_handler, F.text == FAQ_BUTTON)
     dp.message.register(mode_handler, F.text.in_(tuple(MODE_BUTTONS.keys())))

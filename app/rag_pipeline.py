@@ -335,8 +335,17 @@ class RAGPipeline:
         chunk_k = top_k_chunks or settings.top_k_chunks
         entity_k = top_k_entities or settings.top_k_entities
 
-        raw_chunk_results = self.chunk_engine.search(query, top_k=chunk_k)
-        raw_entity_results = self.entity_engine.search(query, top_k=entity_k)
+        try:
+            raw_chunk_results = self.chunk_engine.search(query, top_k=chunk_k)
+        except Exception as exc:
+            print(f"[RAGPipeline] chunk retrieval error: {exc}")
+            raw_chunk_results = []
+
+        try:
+            raw_entity_results = self.entity_engine.search(query, top_k=entity_k)
+        except Exception as exc:
+            print(f"[RAGPipeline] entity retrieval error: {exc}")
+            raw_entity_results = []
 
         chunk_results = self._normalize_chunk_results(raw_chunk_results)
         entity_results = self._normalize_entity_results(raw_entity_results)
@@ -368,25 +377,48 @@ class RAGPipeline:
         top_k: int | None = None,
         mode: str = "hybrid",
     ) -> Dict[str, Any]:
-        # Полный поток: retrieve -> выбор хитов по режиму -> сборка контекста -> запрос к LLM.
-        retrieval = self.retrieve(
-            query=query,
-            top_k_chunks=top_k,
-            top_k_entities=top_k,
-        )
-
+        # Полный поток: retrieve -> сборка контекста -> запрос к LLM.
         normalized_mode = self._normalize_mode(mode)
+        chunk_k = top_k or settings.top_k_chunks
+        entity_k = top_k or settings.top_k_entities
+
+        retrieval: Dict[str, List[Dict[str, Any]]]
+        if normalized_mode == "chunk":
+            # Быстрый путь: считаем только chunk retrieval.
+            try:
+                raw_chunk_results = self.chunk_engine.search(query, top_k=chunk_k)
+            except Exception as exc:
+                print(f"[RAGPipeline] chunk retrieval error: {exc}")
+                raw_chunk_results = []
+            chunk_results = self._normalize_chunk_results(raw_chunk_results)
+            retrieval = {
+                "chunk_results": chunk_results,
+                "entity_results": [],
+                "combined": list(chunk_results),
+            }
+        elif normalized_mode == "entity":
+            # Быстрый путь: считаем только entity retrieval.
+            try:
+                raw_entity_results = self.entity_engine.search(query, top_k=entity_k)
+            except Exception as exc:
+                print(f"[RAGPipeline] entity retrieval error: {exc}")
+                raw_entity_results = []
+            entity_results = self._normalize_entity_results(raw_entity_results)
+            retrieval = {
+                "chunk_results": [],
+                "entity_results": entity_results,
+                "combined": list(entity_results),
+            }
+        else:
+            retrieval = self.retrieve(
+                query=query,
+                top_k_chunks=top_k,
+                top_k_entities=top_k,
+            )
 
         selected_chunk_results = retrieval["chunk_results"]
         selected_entity_results = retrieval["entity_results"]
         selected_hits = retrieval["combined"]
-
-        if normalized_mode == "chunk":
-            selected_entity_results = []
-            selected_hits = selected_chunk_results
-        elif normalized_mode == "entity":
-            selected_chunk_results = []
-            selected_hits = selected_entity_results
 
         context = self._build_context(
             selected_chunk_results,
