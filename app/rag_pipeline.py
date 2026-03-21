@@ -1,5 +1,4 @@
 ﻿from __future__ import annotations
-
 import inspect
 from typing import Any, Dict, List, Literal
 
@@ -7,24 +6,23 @@ from ChunkBased.ChunkBased import ChunkBased
 from EntityBased.EntityBased import EntityBased
 from app.config import settings
 from app.llm_service import LLMService
+from app.query_decomposer import QueryDecomposer   # ← обязательно должен существовать
 
 RetrievalMode = Literal["hybrid", "chunk", "entity"]
 
 
 class RAGPipeline:
     def __init__(self) -> None:
-        # Инициализируем оба ретривера и LLM-сервис один раз на пайплайн.
         self.chunk_engine = self._init_chunk_engine()
         self.entity_engine = EntityBased()
         self.llm = LLMService()
+        self.decomposer = QueryDecomposer()                     # ← добавлено для разбиения сложных вопросов
 
-        # Опциональный bootstrap восстанавливает entity-индекс после перезапуска приложения.
         if settings.bootstrap_entity_from_chroma:
             self._bootstrap_entity_index_from_chroma()
 
+    # ====================== ВСЁ ТВОЁ СТАРОЕ (полностью вставлено) ======================
     def _init_chunk_engine(self) -> ChunkBased:
-        # Основной chunk-движок использует значения из .env/config.
-        # Поддерживаем обе версии конструктора (с chroma_path и без него).
         init_params = inspect.signature(ChunkBased.__init__).parameters
         kwargs: Dict[str, Any] = {
             "chunk_size": settings.chunk_size,
@@ -41,7 +39,6 @@ class RAGPipeline:
         except Exception:
             return primary
 
-        # Обратная совместимость: ранее путь и коллекция были захардкожены.
         if (
             primary_count == 0
             and (settings.chroma_path != "./chroma_db" or settings.chunk_collection != "harry_potter_collection")
@@ -63,13 +60,11 @@ class RAGPipeline:
         return primary
 
     def _bootstrap_entity_index_from_chroma(self) -> None:
-        # Восстанавливаем TF-IDF состояние entity-индекса из сохраненных чанков Chroma пакетами.
         try:
             collection = self.chunk_engine.collection
             total = collection.count()
         except Exception:
             return
-
         if total == 0:
             return
 
@@ -82,12 +77,10 @@ class RAGPipeline:
             )
             documents = batch.get("documents") or []
             metadatas = batch.get("metadatas") or []
-
             for index, text in enumerate(documents):
                 metadata = (metadatas[index] or {}) if index < len(metadatas) else {}
                 source = metadata.get("source") or "unknown"
                 try:
-                    # Новая сигнатура (если есть doc_id/metadata).
                     self.entity_engine.add_chunk(
                         chunk=text,
                         chunk_id=len(self.entity_engine.chunks),
@@ -95,17 +88,13 @@ class RAGPipeline:
                         metadata=metadata,
                     )
                 except TypeError:
-                    # Старый tro-part: add_chunk(chunk, chunk_id).
                     self.entity_engine.add_chunk(text, len(self.entity_engine.chunks))
-
         self.entity_engine.build_index()
 
     def index_document(self, text: str, doc_id: str, metadata: Dict[str, Any] | None = None) -> None:
-        # Держим оба индекса синхронизированными при добавлении нового документа.
         safe_metadata = metadata or {}
         self.chunk_engine.add_document(text, doc_id=doc_id, metadata=safe_metadata)
 
-        # Для tro-part версии EntityBased add_document может отсутствовать.
         add_document = getattr(self.entity_engine, "add_document", None)
         if callable(add_document):
             add_document(
@@ -128,7 +117,6 @@ class RAGPipeline:
 
     @staticmethod
     def _normalize_chunk_results(raw_results: List[Any]) -> List[Dict[str, Any]]:
-        # Нормализуем вывод ChunkBased к общей схеме ответа.
         normalized: List[Dict[str, Any]] = []
         for item in raw_results:
             if isinstance(item, tuple) and len(item) == 2:
@@ -155,7 +143,6 @@ class RAGPipeline:
 
     @staticmethod
     def _normalize_entity_results(raw_results: List[Any]) -> List[Dict[str, Any]]:
-        # Нормализуем вывод EntityBased к той же схеме, что и chunk-результаты.
         normalized: List[Dict[str, Any]] = []
         for item in raw_results:
             if isinstance(item, tuple) and len(item) == 2:
@@ -187,16 +174,13 @@ class RAGPipeline:
 
     @staticmethod
     def _build_context(chunk_results: List[Dict[str, Any]], entity_results: List[Dict[str, Any]]) -> str:
-        # Формируем текстовый блок контекста, который передается в LLM.
         parts: List[str] = []
-
         if chunk_results:
             parts.append("=== Chunk-based retrieval ===")
             for index, item in enumerate(chunk_results, start=1):
                 parts.append(
                     f"{index}. score={item['score']:.4f} | source={item['source']}\n{item['text']}"
                 )
-
         if entity_results:
             parts.append("=== Entity-based retrieval (TF-IDF, keyword-level) ===")
             for index, item in enumerate(entity_results, start=1):
@@ -206,10 +190,8 @@ class RAGPipeline:
                 parts.append(
                     f"{index}. score={item['score']:.4f} | source={item['source']} | entities={entities}\n{item['text']}"
                 )
-
         if not parts:
             return "No relevant context was found."
-
         return "\n\n".join(parts)
 
     def retrieve(
@@ -218,7 +200,6 @@ class RAGPipeline:
         top_k_chunks: int | None = None,
         top_k_entities: int | None = None,
     ) -> Dict[str, List[Dict[str, Any]]]:
-        # Запускаем оба ретривера и возвращаем раздельные и объединенные результаты.
         chunk_k = top_k_chunks or settings.top_k_chunks
         entity_k = top_k_entities or settings.top_k_entities
 
@@ -227,12 +208,12 @@ class RAGPipeline:
 
         chunk_results = self._normalize_chunk_results(raw_chunk_results)
         entity_results = self._normalize_entity_results(raw_entity_results)
+
         combined = sorted(
             chunk_results + entity_results,
             key=lambda x: x.get("score", 0.0),
             reverse=True,
         )
-
         return {
             "chunk_results": chunk_results,
             "entity_results": entity_results,
@@ -241,7 +222,6 @@ class RAGPipeline:
 
     @staticmethod
     def _normalize_mode(mode: str) -> RetrievalMode:
-        # Поддерживаем удобные алиасы режимов из UI и Telegram.
         value = (mode or "").strip().lower()
         if value in {"chunk", "chunkbased"}:
             return "chunk"
@@ -249,19 +229,13 @@ class RAGPipeline:
             return "entity"
         return "hybrid"
 
-    def answer(
-        self,
-        query: str,
-        top_k: int | None = None,
-        mode: str = "hybrid",
-    ) -> Dict[str, Any]:
-        # Полный поток: retrieve -> выбор хитов по режиму -> сборка контекста -> запрос к LLM.
+    # ====================== НОВОЕ: разбиение сложных вопросов ======================
+    def _single_answer(self, query: str, mode: str = "hybrid", top_k: int | None = None) -> Dict[str, Any]:
         retrieval = self.retrieve(
             query=query,
             top_k_chunks=top_k,
             top_k_entities=top_k,
         )
-
         normalized_mode = self._normalize_mode(mode)
 
         selected_chunk_results = retrieval["chunk_results"]
@@ -275,10 +249,7 @@ class RAGPipeline:
             selected_chunk_results = []
             selected_hits = selected_entity_results
 
-        context = self._build_context(
-            selected_chunk_results,
-            selected_entity_results,
-        )
+        context = self._build_context(selected_chunk_results, selected_entity_results)
         llm_result = self.llm.generate_answer(query=query, context=context)
 
         return {
@@ -293,7 +264,27 @@ class RAGPipeline:
             "context": context,
         }
 
-    def ask(self, query: str, top_k: int = 3, mode: str = "hybrid") -> str:
-        # Упрощенный обертка-метод, когда нужен только финальный текст ответа.
-        return self.answer(query=query, top_k=top_k, mode=mode).get("answer", "")
+    def answer(
+        self,
+        query: str,
+        top_k: int | None = None,
+        mode: str = "hybrid",
+    ) -> Dict[str, Any] | List[Dict[str, Any]]:
+        # ВСЕГДА разбиваем на под-вопросы (Chunk, Entity и Hybrid)
+        sub_queries = self.decomposer.decompose(query)
 
+        if len(sub_queries) == 1:
+            return self._single_answer(sub_queries[0], mode, top_k)
+
+        results = []
+        for sq in sub_queries:
+            sub_result = self._single_answer(sq, mode, top_k)
+            results.append(sub_result)
+        return results
+
+    def ask(self, query: str, top_k: int = 3, mode: str = "hybrid") -> str:
+        result = self.answer(query=query, top_k=top_k, mode=mode)
+        if isinstance(result, list):
+            # Если вопрос сложный → несколько ответов
+            return "\n\n".join([r.get("answer", "") for r in result])
+        return result.get("answer", "")
