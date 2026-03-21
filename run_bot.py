@@ -2,7 +2,5 @@
 import asyncio
 
 if __name__ == '__main__':
-    # Легковесный запуск цикла polling для Telegram-бота.
-    print("Starting Telegram bot...", flush=True)
+    print("Starting Telegram bot...")
     asyncio.run(main())
-

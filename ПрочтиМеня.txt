@@ -18,3 +18,20 @@ source venv/bin/activate
 
 установка пакетов:
 pip install -r requirements.txt
+
+
+
+taskkill /f /im ollama.exe  чтобы убить все ранее запущенные оламы
+
+ollama serve  чтобы запустить оламу
+
+$env:OLLAMA_HOST="127.0.0.1:11435"  каждый раз, чтобы олама слушала этот порт, 34 занят виндой
+
+$env:OLLAMA_HOST="127.0.0.1:11435"
+ollama pull llama3.2:3b  - установка более легкой модели оламы
+
+LLM_MODEL=llama3.2:3b
+LLM_TIMEOUT_SEC=180  - лёгкая модель
+
+LLM_MODEL=qwen2.5:7b-instruct
+LLM_TIMEOUT_SEC=300  - старя тяжёлая(долго отвечает)

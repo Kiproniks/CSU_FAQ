@@ -77,24 +77,28 @@ def _snippet(text: str, max_len: int = 420) -> str:
 
 
 def build_bot_answer(result: dict) -> str:
-    # Возвращаем ответ LLM или краткие фрагменты поиска в режиме echo.
-    if result.get("provider") != "echo":
-        return result.get("answer", "")
+    # Основной ответ от LLM (всегда показываем)
+    llm_part = result.get("answer", "Нет ответа от LLM.")
 
     hits = result.get("hits", [])
     if not hits:
-        return "No relevant fragments were found in indexed files."
+        return llm_part
 
-    lines = [
-        "LLM is unavailable, showing best matching fragments from indexed files:",
-    ]
-    for hit in hits[:2]:
-        source = hit.get("source", "unknown")
+    # ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
+    # Полные чанки ВСЕГДА (как ты просил)
+    chunks_block = ["\n📚 **Полные чанки из базы (ChunkBased):**"]
+    for i, hit in enumerate(hits, 1):
+        source = hit.get("source", "unknown.pdf")
         score = float(hit.get("score", 0.0))
-        lines.append(f"[{source}] score={score:.3f}")
-        lines.append(_snippet(hit.get("text", "")))
+        full_text = hit.get("text", "").strip()          # полный текст без обрезки
+        chunks_block.append(
+            f"[{i}] **{source}** (score={score:.3f})\n"
+            f"{full_text}\n"
+            f"{'─' * 50}"
+        )
+    # ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
 
-    return "\n\n".join(lines)
+    return llm_part + "\n\n" + "\n".join(chunks_block)
 
 
 async def start_handler(message: Message) -> None:
@@ -136,7 +140,7 @@ async def question_handler(message: Message) -> None:
         return
 
     answer = build_bot_answer(result)
-    response_text = f"Mode: {mode}\n\n{answer}{format_hits(result.get('hits', []))}"
+    response_text = f"Mode: {mode}\n\n{answer}"
     # Жесткий лимит сообщения Telegram — 4096 символов.
     await message.answer(response_text[:4000])
 
