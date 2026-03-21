@@ -8,6 +8,7 @@ from typing import Dict, List, Tuple
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
+from app.db import get_database
 from app.text_splitter import smart_chunk_text
 
 RUS_STOPWORDS = {
@@ -281,6 +282,14 @@ class EntityBased:
             self.entity_to_chunks[entity].append(idx)
 
         self.tfidf_matrix = None
+        try:
+            get_database().replace_chunk_entities(
+                chunk_id=str(chunk_id),
+                doc_id=str(doc_id),
+                entities=entities,
+            )
+        except Exception:
+            pass
 
     def add_document(
         self,
@@ -415,4 +424,7 @@ class EntityBased:
         self.chunk_tokens.clear()
         self.entity_to_chunks.clear()
         self.tfidf_matrix = None
-
+        try:
+            get_database().clear_entity_storage()
+        except Exception:
+            pass

@@ -9,6 +9,7 @@ from chromadb.utils import embedding_functions
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
+from app.db import get_database
 from app.text_splitter import dot_dot_chunk_text, smart_chunk_text
 
 RUS_STOPWORDS = {
@@ -248,6 +249,48 @@ class ChunkBased:
     def _ensure_local_cache_from_collection(self) -> None:
         if self.chunks:
             return
+
+        # Приоритетно восстанавливаем чанки из PostgreSQL.
+        try:
+            db_rows = get_database().load_chunks(limit=300000)
+        except Exception:
+            db_rows = []
+
+        if db_rows:
+            ids: List[str] = []
+            documents: List[str] = []
+            metadatas: List[Dict] = []
+            restored: List[Dict] = []
+            for row in db_rows:
+                chunk_id = str((row or {}).get("chunk_id", "")).strip()
+                text = str((row or {}).get("text", "") or "")
+                metadata = (row or {}).get("metadata", {}) or {}
+                if not chunk_id or not text.strip():
+                    continue
+                ids.append(chunk_id)
+                documents.append(text)
+                metadatas.append(metadata)
+                restored.append({"id": chunk_id, "text": text, "metadata": metadata})
+
+            if restored:
+                try:
+                    batch = self.upsert_batch_size
+                    for start in range(0, len(ids), batch):
+                        end = start + batch
+                        self.collection.upsert(
+                            documents=documents[start:end],
+                            ids=ids[start:end],
+                            metadatas=metadatas[start:end],
+                        )
+                except Exception:
+                    pass
+
+                self.chunks.extend(restored)
+                self._chunk_by_id = {str(item["id"]): item for item in self.chunks}
+                self._rebuild_doc_chunk_index_map()
+                self._mark_sparse_dirty()
+                return
+
         try:
             total = self.collection.count()
         except Exception:
@@ -281,6 +324,27 @@ class ChunkBased:
         self.chunks.extend(restored)
         self._chunk_by_id = {str(item["id"]): item for item in self.chunks}
         self._rebuild_doc_chunk_index_map()
+        try:
+            rows = []
+            for item in restored:
+                meta = dict(item.get("metadata", {}) or {})
+                doc_id = str(meta.get("doc_id") or meta.get("source") or "unknown")
+                try:
+                    chunk_index = int(meta.get("chunk_index", 0))
+                except Exception:
+                    chunk_index = 0
+                rows.append(
+                    {
+                        "chunk_id": str(item.get("id", "")),
+                        "doc_id": doc_id,
+                        "chunk_index": chunk_index,
+                        "text": str(item.get("text", "") or ""),
+                        "metadata": meta,
+                    }
+                )
+            get_database().upsert_chunks(rows)
+        except Exception:
+            pass
         self._mark_sparse_dirty()
 
     def _ensure_sparse_index(self) -> None:
@@ -359,6 +423,22 @@ class ChunkBased:
             self.chunks.append(payload)
             self._chunk_by_id[str(chunk_id)] = payload
             self._doc_chunk_index_map[(str(doc_id), int(index))] = str(chunk_id)
+
+        # Храним чанки в PostgreSQL как основной персистентный слой.
+        try:
+            rows = [
+                {
+                    "chunk_id": ids[i],
+                    "doc_id": str(doc_id),
+                    "chunk_index": int(i),
+                    "text": documents[i],
+                    "metadata": metadatas[i],
+                }
+                for i in range(len(ids))
+            ]
+            get_database().upsert_chunks(rows)
+        except Exception:
+            pass
 
         batch = self.upsert_batch_size
         for start in range(0, len(ids), batch):
@@ -559,6 +639,10 @@ class ChunkBased:
             name=name,
             embedding_function=self.embedding_function,
         )
+        try:
+            get_database().clear_chunk_entity_storage()
+        except Exception:
+            pass
         self.chunks.clear()
         self._chunk_by_id.clear()
         self._doc_chunk_index_map.clear()
@@ -595,4 +679,3 @@ class ChunkBased:
 
 if __name__ == "__main__":
     print("ChunkBased ready")
-

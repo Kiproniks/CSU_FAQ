@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Literal
 from ChunkBased.ChunkBased import ChunkBased
 from EntityBased.EntityBased import EntityBased
 from app.config import settings
+from app.db import get_database
 from app.llm_service import LLMService
 
 RetrievalMode = Literal["hybrid", "chunk", "entity"]
@@ -25,9 +26,13 @@ class RAGPipeline:
         )
         self.llm = LLMService()
 
-        # Опциональный bootstrap восстанавливает entity-индекс после перезапуска приложения.
+        # Сначала поднимаем индексы из PostgreSQL (authoritative storage).
+        loaded_from_db = self._bootstrap_from_database()
+
+        # Fallback: если в БД пусто, можно поднять entity-индекс из Chroma.
         if settings.bootstrap_entity_from_chroma:
-            self._bootstrap_entity_index_from_chroma()
+            if not loaded_from_db:
+                self._bootstrap_entity_index_from_chroma()
 
     def _init_chunk_engine(self) -> ChunkBased:
         # Основной chunk-движок использует значения из .env/config.
@@ -111,6 +116,98 @@ class RAGPipeline:
                     self.entity_engine.add_chunk(text, len(self.entity_engine.chunks))
 
         self.entity_engine.build_index()
+
+    def _bootstrap_from_database(self) -> bool:
+        """Восстанавливает chunk/entity из PostgreSQL. Возвращает True, если что-то загружено."""
+        try:
+            rows = get_database().load_chunks(limit=300000)
+        except Exception:
+            rows = []
+
+        if not rows:
+            return False
+
+        chunk_rows = []
+        for row in rows:
+            chunk_id = str((row or {}).get("chunk_id", "")).strip()
+            text = str((row or {}).get("text", "") or "")
+            metadata = (row or {}).get("metadata", {}) or {}
+            doc_id = str((row or {}).get("doc_id", "") or metadata.get("doc_id") or metadata.get("source") or "unknown")
+            try:
+                chunk_index = int((row or {}).get("chunk_index", metadata.get("chunk_index", 0)) or 0)
+            except Exception:
+                chunk_index = 0
+            if not chunk_id or not text.strip():
+                continue
+            chunk_rows.append(
+                {
+                    "chunk_id": chunk_id,
+                    "doc_id": doc_id,
+                    "chunk_index": chunk_index,
+                    "text": text,
+                    "metadata": metadata,
+                }
+            )
+
+        if not chunk_rows:
+            return False
+
+        # Прогреваем chunk-движок из DB данных (и Chroma, если доступна).
+        try:
+            self.chunk_engine.chunks = []
+            self.chunk_engine._chunk_by_id = {}
+            self.chunk_engine._doc_chunk_index_map = {}
+            ids = []
+            documents = []
+            metadatas = []
+            for row in chunk_rows:
+                chunk_id = row["chunk_id"]
+                metadata = dict(row["metadata"] or {})
+                metadata.setdefault("doc_id", row["doc_id"])
+                metadata.setdefault("chunk_index", row["chunk_index"])
+                ids.append(chunk_id)
+                documents.append(row["text"])
+                metadatas.append(metadata)
+                payload = {"id": chunk_id, "text": row["text"], "metadata": metadata}
+                self.chunk_engine.chunks.append(payload)
+                self.chunk_engine._chunk_by_id[str(chunk_id)] = payload
+                self.chunk_engine._doc_chunk_index_map[(str(metadata.get("doc_id")), int(metadata.get("chunk_index", 0)))] = str(chunk_id)
+
+            try:
+                batch = max(1, int(getattr(self.chunk_engine, "upsert_batch_size", 1000)))
+                for start in range(0, len(ids), batch):
+                    end = start + batch
+                    self.chunk_engine.collection.upsert(
+                        ids=ids[start:end],
+                        documents=documents[start:end],
+                        metadatas=metadatas[start:end],
+                    )
+            except Exception:
+                pass
+
+            self.chunk_engine._mark_sparse_dirty()
+        except Exception:
+            return False
+
+        # Пересобираем entity-индекс из chunk-текста.
+        try:
+            self.entity_engine.chunks.clear()
+            self.entity_engine.chunk_entities.clear()
+            self.entity_engine.chunk_tokens.clear()
+            self.entity_engine.entity_to_chunks.clear()
+            self.entity_engine.tfidf_matrix = None
+            for row in chunk_rows:
+                self.entity_engine.add_chunk(
+                    chunk=row["text"],
+                    chunk_id=row["chunk_id"],
+                    doc_id=row["doc_id"],
+                    metadata=row["metadata"],
+                )
+            self.entity_engine.build_index()
+        except Exception:
+            return False
+
+        return True
 
     def index_document(self, text: str, doc_id: str, metadata: Dict[str, Any] | None = None) -> None:
         # Держим оба индекса синхронизированными при добавлении нового документа.

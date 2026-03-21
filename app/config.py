@@ -36,7 +36,7 @@ class Settings:
     # Настройки рантайма и API.
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     llm_provider: str = os.getenv("LLM_PROVIDER", "echo")
-    llm_model: str = os.getenv("LLM_MODEL", "llama3.1:8b")
+    llm_model: str = os.getenv("LLM_MODEL", "llama3.2:2b")
     ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     llm_timeout_sec: int = int(os.getenv("LLM_TIMEOUT_SEC", "30"))
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")

@@ -193,6 +193,45 @@ class AnalyticsDB:
                 )
                 cur.execute(
                     """
+                    CREATE TABLE IF NOT EXISTS chunk_store (
+                        id BIGSERIAL PRIMARY KEY,
+                        chunk_id TEXT NOT NULL UNIQUE,
+                        doc_id TEXT NOT NULL,
+                        chunk_index INTEGER NOT NULL DEFAULT 0,
+                        text TEXT NOT NULL,
+                        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        UNIQUE (doc_id, chunk_index)
+                    );
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_chunk_store_doc_chunk
+                    ON chunk_store (doc_id, chunk_index);
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS entity_store (
+                        id BIGSERIAL PRIMARY KEY,
+                        chunk_id TEXT NOT NULL REFERENCES chunk_store(chunk_id) ON DELETE CASCADE,
+                        doc_id TEXT NOT NULL,
+                        entity TEXT NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        UNIQUE (chunk_id, entity)
+                    );
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_entity_store_entity
+                    ON entity_store (entity);
+                    """
+                )
+                cur.execute(
+                    """
                     CREATE INDEX IF NOT EXISTS idx_benchmark_variants_run_id
                     ON benchmark_variants(run_id);
                     """
@@ -727,6 +766,119 @@ class AnalyticsDB:
                         int(max(0, latency_ms)),
                     ),
                 )
+
+    def upsert_chunks(self, rows: List[Dict[str, Any]]) -> int:
+        """Сохраняет чанки в PostgreSQL (authoritative storage)."""
+        conn = self._connect()
+        if conn is None or not rows:
+            return 0
+
+        saved = 0
+        with conn:
+            with conn.cursor() as cur:
+                for row in rows:
+                    chunk_id = str((row or {}).get("chunk_id", "")).strip()
+                    doc_id = str((row or {}).get("doc_id", "")).strip() or "unknown"
+                    text = str((row or {}).get("text", "") or "")
+                    metadata = (row or {}).get("metadata", {}) or {}
+                    try:
+                        chunk_index = int((row or {}).get("chunk_index", 0) or 0)
+                    except Exception:
+                        chunk_index = 0
+                    if not chunk_id or not text.strip():
+                        continue
+
+                    cur.execute(
+                        """
+                        INSERT INTO chunk_store (chunk_id, doc_id, chunk_index, text, metadata, updated_at)
+                        VALUES (%s, %s, %s, %s, %s::jsonb, NOW())
+                        ON CONFLICT (chunk_id)
+                        DO UPDATE SET
+                            doc_id = EXCLUDED.doc_id,
+                            chunk_index = EXCLUDED.chunk_index,
+                            text = EXCLUDED.text,
+                            metadata = EXCLUDED.metadata,
+                            updated_at = NOW();
+                        """,
+                        (
+                            chunk_id,
+                            doc_id,
+                            int(max(0, chunk_index)),
+                            text,
+                            self._to_json_text(metadata if isinstance(metadata, dict) else {}),
+                        ),
+                    )
+                    saved += 1
+        return saved
+
+    def load_chunks(self, limit: int = 200000) -> List[Dict[str, Any]]:
+        conn = self._connect()
+        if conn is None:
+            return []
+
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT chunk_id, doc_id, chunk_index, text, metadata
+                    FROM chunk_store
+                    ORDER BY doc_id ASC, chunk_index ASC, id ASC
+                    LIMIT %s;
+                    """,
+                    (max(1, int(limit)),),
+                )
+                rows = cur.fetchall() or []
+                return [dict(row) for row in rows]
+
+    def replace_chunk_entities(self, chunk_id: str, doc_id: str, entities: List[str]) -> int:
+        conn = self._connect()
+        if conn is None:
+            return 0
+        normalized = []
+        for item in entities or []:
+            value = str(item or "").strip().lower()
+            if value:
+                normalized.append(value)
+        unique_entities = sorted(set(normalized))
+
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    DELETE FROM entity_store
+                    WHERE chunk_id = %s;
+                    """,
+                    (str(chunk_id),),
+                )
+                inserted = 0
+                for entity in unique_entities:
+                    cur.execute(
+                        """
+                        INSERT INTO entity_store (chunk_id, doc_id, entity)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT (chunk_id, entity) DO NOTHING;
+                        """,
+                        (str(chunk_id), str(doc_id or "unknown"), entity),
+                    )
+                    inserted += 1
+        return inserted
+
+    def clear_chunk_entity_storage(self) -> None:
+        conn = self._connect()
+        if conn is None:
+            return
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM entity_store;")
+                cur.execute("DELETE FROM chunk_store;")
+
+    def clear_entity_storage(self) -> None:
+        conn = self._connect()
+        if conn is None:
+            return
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM entity_store;")
 
     def top_faq_questions(self, last_n: int = 100, top_n: int = 10) -> List[Dict[str, Any]]:
         """Топ часто задаваемых вопросов по последним N запросам."""
