@@ -15,7 +15,14 @@ class RAGPipeline:
     def __init__(self) -> None:
         # Инициализируем оба ретривера и LLM-сервис один раз на пайплайн.
         self.chunk_engine = self._init_chunk_engine()
-        self.entity_engine = EntityBased()
+        self.entity_engine = EntityBased(
+            min_entity_length=settings.entity_min_length,
+            max_entities_per_chunk=settings.entity_max_entities_per_chunk,
+            tfidf_weight=settings.entity_tfidf_weight,
+            entity_overlap_weight=settings.entity_overlap_weight,
+            min_score=settings.entity_min_score,
+            mmr_lambda=settings.entity_mmr_lambda,
+        )
         self.llm = LLMService()
 
         # Опциональный bootstrap восстанавливает entity-индекс после перезапуска приложения.
@@ -29,7 +36,10 @@ class RAGPipeline:
         kwargs: Dict[str, Any] = {
             "chunk_size": settings.chunk_size,
             "overlap": settings.chunk_overlap,
+            "splitter_mode": settings.chunk_splitter_mode,
+            "mmr_lambda": settings.chunk_mmr_lambda,
             "collection_name": settings.chunk_collection,
+            "embedding_model": settings.chunk_embedding_model,
         }
         if "chroma_path" in init_params:
             kwargs["chroma_path"] = settings.chroma_path
@@ -49,6 +59,8 @@ class RAGPipeline:
             legacy_kwargs: Dict[str, Any] = {
                 "chunk_size": settings.chunk_size,
                 "overlap": settings.chunk_overlap,
+                "splitter_mode": settings.chunk_splitter_mode,
+                "mmr_lambda": settings.chunk_mmr_lambda,
                 "collection_name": "harry_potter_collection",
             }
             if "chroma_path" in init_params:
@@ -112,16 +124,20 @@ class RAGPipeline:
                 text,
                 doc_id=doc_id,
                 metadata=safe_metadata,
-                chunk_size=settings.chunk_size,
-                overlap=settings.chunk_overlap,
+                chunk_size=settings.entity_chunk_size,
+                overlap=settings.entity_chunk_overlap,
             )
             return
 
         split_text = getattr(self.entity_engine, "_split_text", None)
         if callable(split_text):
-            chunks = split_text(text, chunk_size=settings.chunk_size, overlap=settings.chunk_overlap)
+            chunks = split_text(
+                text,
+                chunk_size=settings.entity_chunk_size,
+                overlap=settings.entity_chunk_overlap,
+            )
         else:
-            chunks = ChunkBased._split_text(text, settings.chunk_size, settings.chunk_overlap)
+            chunks = ChunkBased._split_text(text, settings.entity_chunk_size, settings.entity_chunk_overlap)
 
         for chunk in chunks:
             self.entity_engine.add_chunk(chunk, len(self.entity_engine.chunks))
@@ -296,4 +312,5 @@ class RAGPipeline:
     def ask(self, query: str, top_k: int = 3, mode: str = "hybrid") -> str:
         # Упрощенный обертка-метод, когда нужен только финальный текст ответа.
         return self.answer(query=query, top_k=top_k, mode=mode).get("answer", "")
+
 

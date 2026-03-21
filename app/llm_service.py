@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional
+from urllib.parse import urlparse
 
 import requests
 
@@ -72,8 +73,15 @@ class LLMService:
         # Ветка Ollama: локальный HTTP-вызов с низкой temperature для стабильных ответов.
         prompt = self._build_prompt(query, context)
         try:
-            response = requests.post(
-                f"{settings.ollama_base_url.rstrip('/')}/api/generate",
+            base_url = settings.ollama_base_url.rstrip("/")
+            hostname = (urlparse(base_url).hostname or "").lower()
+            # Для localhost отключаем прокси из окружения: они часто дают 502 на локальном Ollama.
+            session = requests.Session()
+            if hostname in {"localhost", "127.0.0.1", "::1"}:
+                session.trust_env = False
+
+            response = session.post(
+                f"{base_url}/api/generate",
                 json={
                     "model": self.model,
                     "prompt": prompt,
@@ -102,17 +110,13 @@ class LLMService:
 
     @staticmethod
     def _echo_fallback(query: str, context: str, reason: str = "") -> LLMResponse:
-        # Безопасный debug-fallback, возвращающий исходный контекст для прозрачности.
-        prefix = "LLM fallback mode (echo)."
+        # Безопасный fallback без публикации длинного контекста в ответ пользователю.
+        message = "LLM fallback mode (echo)."
         if reason:
-            prefix = f"{prefix} Reason: {reason}"
-
+            message = f"{message} Reason: {reason}"
+        message = f"{message}\n\nLLM временно недоступна. Повторите запрос позже."
         return LLMResponse(
-            answer=(
-                f"{prefix}\n\n"
-                f"Question: {query}\n\n"
-                f"Context:\n{context}"
-            ),
+            answer=message,
             provider="echo",
             model="debug",
         )

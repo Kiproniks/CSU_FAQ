@@ -12,6 +12,7 @@
       --muted: #475569;
       --accent: #0f766e;
       --border: #cbd5e1;
+      --danger: #b91c1c;
     }
     body {
       margin: 0;
@@ -20,7 +21,7 @@
       color: var(--text);
     }
     .wrap {
-      max-width: 900px;
+      max-width: 980px;
       margin: 24px auto;
       padding: 0 16px 24px;
     }
@@ -50,28 +51,94 @@
     }
     .grid {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: 1fr;
       gap: 10px;
     }
     .muted { color: var(--muted); font-size: 13px; }
-    .error { color: #b91c1c; font-weight: 600; }
+    .error { color: var(--danger); font-weight: 600; }
     .answer { white-space: pre-wrap; line-height: 1.5; }
     .hit {
       border-top: 1px solid var(--border);
       padding-top: 10px;
       margin-top: 10px;
     }
+    .source-attribution-card {
+      border: 1px solid #d1d5db;
+      background: #f8fafc;
+      border-radius: 10px;
+      padding: 10px;
+      margin-top: 10px;
+    }
+    .source-attribution-title {
+      font-weight: 700;
+      color: #0f766e;
+    }
+    .source-attribution-meta {
+      color: #475569;
+      font-size: 12px;
+      margin-top: 2px;
+    }
+    .source-attribution-snippet {
+      margin-top: 8px;
+      line-height: 1.45;
+    }
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+      align-items: center;
+    }
+    .toolbar a {
+      text-decoration: none;
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      color: var(--text);
+      background: #fff;
+      font-size: 13px;
+    }
+    .toprow {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <!-- Шапка с активной LLM -->
     <div class="card">
-      <h1>CSU FAQ</h1>
-      <div class="muted">LLM: {{ llm_provider }} / {{ llm_model }}</div>
+      <div class="toprow">
+        <div>
+          <h1>CSU FAQ</h1>
+          <div class="muted">LLM: {{ llm_provider }} / {{ llm_model }}</div>
+          {% if monthly_unlimited %}
+            <div class="muted">Лимит: без ограничений (admin). Использовано в этом месяце: {{ monthly_used }}.</div>
+          {% else %}
+            <div class="muted">Лимит: {{ monthly_used }} / {{ monthly_limit }} запросов в этом месяце (осталось {{ monthly_remaining }}).</div>
+          {% endif %}
+        </div>
+        <div class="toolbar">
+          <a href="{{ faq_url }}">FAQ</a>
+          {% if auth_user %}
+            <span class="muted">Пользователь: <b>{{ auth_user.username }}</b>{% if is_admin %} (admin){% endif %}</span>
+            <a href="{{ auth_logout_url }}">Выйти</a>
+          {% else %}
+            <a href="{{ auth_login_url }}">Авторизоваться</a>
+            <a href="{{ auth_register_url }}">Регистрация</a>
+          {% endif %}
+          {% if is_admin %}
+            <a href="{{ admin_url }}">Админ-панель</a>
+          {% endif %}
+        </div>
+      </div>
+      {% if not db_enabled %}
+        <div class="error" style="margin-top: 8px;">PostgreSQL недоступен: {{ db_reason or "статистика и токены не сохраняются" }}.</div>
+      {% endif %}
     </div>
 
-    <!-- Форма вопроса: запрос + режим + top-k -->
     <div class="card">
       <h2>Вопрос</h2>
       <form method="post">
@@ -84,10 +151,6 @@
               <option value="entity" {% if mode == "entity" %}selected{% endif %}>EntityBased</option>
             </select>
           </div>
-          <div>
-            <label for="top_k">Top-K:</label>
-            <input type="number" min="1" max="20" id="top_k" name="top_k" value="{{ top_k }}">
-          </div>
         </div>
         <button type="submit">Спросить</button>
       </form>
@@ -97,24 +160,25 @@
     </div>
 
     {% if result %}
-    <!-- Финальный сгенерированный ответ -->
     <div class="card">
       <h2>Ответ</h2>
       <div class="answer">{{ result.answer }}</div>
       <div class="muted">provider={{ result.provider }}, model={{ result.model }}, mode={{ result.mode }}</div>
     </div>
 
-    <!-- Фрагменты поиска, использованные как фактическая основа ответа -->
     <div class="card">
       <h2>На чем основан ответ: {{ basis_label }}</h2>
-      {% if basis_hits %}
-        {% for hit in basis_hits %}
-        <div class="hit">
-          <strong>score={{ "%.4f"|format(hit.score) }}</strong> | {{ hit.source }}
-          {% if hit.entities %}
-          <div class="muted">entities: {{ ", ".join(hit.entities[:10]) }}</div>
-          {% endif %}
-          <div>{{ snippet(hit.text) }}</div>
+      {% if basis_cards %}
+        {% for card in basis_cards %}
+        <div class="source-attribution-card">
+          <div class="source-attribution-title">{{ card.title }}</div>
+          <div class="source-attribution-meta">
+            score={{ "%.4f"|format(card.score) }} | source={{ card.source }}
+            {% if card.entities %}
+            | entities={{ ", ".join(card.entities[:10]) }}
+            {% endif %}
+          </div>
+          <div class="source-attribution-snippet">{{ snippet(card.text) }}</div>
         </div>
         {% endfor %}
       {% else %}
@@ -125,4 +189,3 @@
   </div>
 </body>
 </html>
-

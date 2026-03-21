@@ -19,6 +19,18 @@ search_visualization.png
 /data/chroma_db/
 /ChunkBased/chroma_db/
 /data/split_visualization/
+/data/chunk_size_lab*/
+/data/runtime_logs/
+/test_runs/logs/
+/test_runs/results/
+/test_runs/tmp/
+/test_runs/archive_old/
+/test_runs/runtime_*.log
+/test_runs/runtime_*.err.log
+/test_runs/
+/logs/
+/pg_data_*/
+*.log
 
 # Source documents (keep folder locally, do not commit PDFs)
 /harry_potter/*.pdf
