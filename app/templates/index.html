@@ -113,7 +113,6 @@
       <div class="toprow">
         <div>
           <h1>CSU FAQ</h1>
-          <div class="muted">LLM: {{ llm_provider }} / {{ llm_model }}</div>
           {% if monthly_unlimited %}
             <div class="muted">Лимит: без ограничений (admin). Использовано в этом месяце: {{ monthly_used }}.</div>
           {% else %}
@@ -163,7 +162,6 @@
     <div class="card">
       <h2>Ответ</h2>
       <div class="answer">{{ result.answer }}</div>
-      <div class="muted">provider={{ result.provider }}, model={{ result.model }}, mode={{ result.mode }}</div>
     </div>
 
     <div class="card">
