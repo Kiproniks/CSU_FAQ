@@ -17,6 +17,7 @@ from aiogram.types import (
 
 from app.config import settings
 from app.db import get_database
+from app.faq_catalog import build_faq_rows
 from app.rag_pipeline import RAGPipeline
 from app.source_attribution import SourceAttributionFormatter
 
@@ -134,25 +135,23 @@ def build_admin_help_text(public_base_url: str = "") -> str:
 
 
 def build_faq_text(last_n: int = 100, top_n: int = 10, mode: str = "chunk") -> str:
-    # Топ часто задаваемых вопросов + сохраненные ответы из query_logs.
+    # FAQ в 2 слоя: 10 фиксированных + 10 динамических вопросов из query_logs.
     try:
-        rows = get_db().top_faq_questions(last_n=last_n, top_n=top_n)
+        dynamic_rows = get_db().top_faq_questions(last_n=last_n, top_n=50)
     except Exception as exc:
         return f"FAQ временно недоступен: {exc}"
+    rows = build_faq_rows(dynamic_rows=dynamic_rows, dynamic_limit=10)
     if not rows:
         return "FAQ пока пуст. Задай несколько вопросов."
 
-    lines = ["FAQ: топ вопросов"]
+    lines = ["FAQ: 10 базовых + 10 актуальных"]
     for idx, row in enumerate(rows, start=1):
         question = " ".join(str(row.get("question", "")).split())
         if not question:
             continue
 
         saved_answer = " ".join(str(row.get("answer", "")).split())
-        if saved_answer:
-            answer = _snippet(saved_answer, max_len=FAQ_ANSWER_MAX_LEN)
-        else:
-            answer = "Ответ появится после следующего запроса этого вопроса в QA."
+        answer = _snippet(saved_answer, max_len=FAQ_ANSWER_MAX_LEN)
 
         block = f"{idx}. Вопрос: {question}\nОтвет: {answer}"
         if len("\n\n".join(lines + [block])) > FAQ_MESSAGE_MAX_LEN:

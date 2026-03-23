@@ -12,6 +12,7 @@ from flask import Flask, abort, make_response, redirect, render_template, reques
 from app.access_tokens import verify_signed_payload
 from app.config import settings
 from app.db import get_database
+from app.faq_catalog import build_faq_rows
 from app.rag_pipeline import RAGPipeline
 from app.source_attribution import SourceAttributionFormatter
 
@@ -51,30 +52,18 @@ def _snippet(text: str, limit: int = 260) -> str:
     return f"{compact[:limit]}..."
 
 
-def _build_faq_rows_with_answers(rows: list[dict[str, Any]], mode: str = "chunk") -> list[dict[str, Any]]:
-    # Для каждого FAQ-вопроса показываем последний сохраненный ответ из query_logs.
-    if not rows:
-        return []
-
-    enriched: list[dict[str, Any]] = []
+def _prepare_faq_rows(dynamic_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    # Финальный FAQ: 10 фиксированных + 10 динамических (последние популярные вопросы).
+    rows = build_faq_rows(dynamic_rows=dynamic_rows, dynamic_limit=10)
+    out: list[dict[str, Any]] = []
     for row in rows:
-        question = " ".join(str((row or {}).get("question", "")).split())
-        if not question:
-            continue
-
-        saved_answer = " ".join(str((row or {}).get("answer", "")).split())
-        if saved_answer:
-            answer_text = _snippet(saved_answer, limit=420)
-        else:
-            answer_text = "Ответ появится после следующего запроса этого вопроса в QA."
-
-        enriched.append(
+        out.append(
             {
-                "question": question,
-                "answer": answer_text,
+                "question": " ".join(str((row or {}).get("question", "")).split()),
+                "answer": _snippet(str((row or {}).get("answer", "")), limit=420),
             }
         )
-    return enriched
+    return out
 
 
 def _safe_next_url(raw: str | None) -> str:
@@ -353,11 +342,11 @@ def faq_page() -> str:
     auth_user = _get_session_user()
     faq_error = ""
     try:
-        rows = db.top_faq_questions(last_n=100, top_n=10)
+        rows = db.top_faq_questions(last_n=100, top_n=50)
     except Exception as exc:
         rows = []
         faq_error = f"FAQ временно недоступен: {exc}"
-    faq_rows = _build_faq_rows_with_answers(rows, mode="chunk")
+    faq_rows = _prepare_faq_rows(rows)
 
     return render_template(
         "faq.html",
