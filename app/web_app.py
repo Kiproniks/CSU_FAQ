@@ -22,7 +22,7 @@ app.secret_key = settings.web_secret_key
 _pipeline: RAGPipeline | None = None
 _pipeline_lock = threading.Lock()
 _pipeline_ready = threading.Event()
-ANSWER_TIMEOUT_SEC = 45
+ANSWER_TIMEOUT_SEC = settings.answer_timeout_sec
 
 
 # -------------------------
@@ -109,7 +109,14 @@ def _get_session_user() -> dict[str, Any] | None:
 
 def _is_admin_authenticated() -> bool:
     user = _get_session_user()
-    return bool(user and user.get("is_admin"))
+    if not user:
+        return False
+    # Админ-панель доступна только владельцу web-аккаунта из настроек.
+    return bool(
+        user.get("is_admin")
+        and user.get("source") == "web"
+        and str(user.get("username", "")).strip().lower() == settings.web_admin_username.strip().lower()
+    )
 
 
 def _require_admin():
@@ -242,7 +249,7 @@ def index() -> str:
     result: dict[str, Any] | None = None
     basis_hits: list[dict[str, Any]] = []
     basis_cards: list[dict[str, Any]] = []
-    basis_label = "ChunkBased"
+    basis_label = "Режим поиска по фрагментам текста"
     error = ""
     query = ""
     mode = "chunk"
@@ -301,7 +308,7 @@ def index() -> str:
         # Показ фрагментов, на которых основан ответ.
         basis_hits = (result.get("hits", []) or [])[:1]
         basis_cards = [SourceAttributionFormatter.to_card(hit) for hit in basis_hits]
-        basis_label = "EntityBased (TF-IDF + entities)" if mode == "entity" else "ChunkBased"
+        basis_label = "Режим поиска по сущностям (TF-IDF + сущности)" if mode == "entity" else "Режим поиска по фрагментам текста"
 
     html = render_template(
         "index.html",
@@ -318,7 +325,7 @@ def index() -> str:
         db_enabled=db.status().enabled,
         db_reason=db.status().reason,
         auth_user=auth_user,
-        is_admin=bool(auth_user and auth_user.get("is_admin")),
+        is_admin=_is_admin_authenticated(),
         monthly_limit=quota.get("limit", settings.user_monthly_request_limit),
         monthly_used=quota.get("used", 0),
         monthly_remaining=quota.get("remaining", settings.user_monthly_request_limit),
@@ -353,7 +360,7 @@ def faq_page() -> str:
         faq_rows=faq_rows,
         faq_error=faq_error,
         auth_user=auth_user,
-        is_admin=bool(auth_user and auth_user.get("is_admin")),
+        is_admin=_is_admin_authenticated(),
         db_enabled=db.status().enabled,
         db_reason=db.status().reason,
         auth_login_url=url_for("auth_login", next="/faq"),

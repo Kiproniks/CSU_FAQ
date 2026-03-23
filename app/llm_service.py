@@ -182,8 +182,9 @@ class LLMService:
                         "prompt": prompt,
                         "stream": False,
                         "options": {
-                            "temperature": 0.2,
+                            "temperature": 0.1,
                             "top_p": 0.9,
+                            "num_predict": 120,
                         },
                     },
                     timeout=(3, settings.llm_timeout_sec),

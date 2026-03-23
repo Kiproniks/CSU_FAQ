@@ -28,8 +28,8 @@ _pipeline_ready = threading.Event()
 _chat_modes: dict[int, str] = {}
 
 # Кнопки для пользователя и внутреннее сопоставление режимов.
-CHUNK_MODE_BUTTON = "ChunkBased"
-ENTITY_MODE_BUTTON = "EntityBased"
+CHUNK_MODE_BUTTON = "Режим поиска по фрагментам текста"
+ENTITY_MODE_BUTTON = "Режим поиска по сущностям"
 FAQ_BUTTON = "FAQ"
 MODE_BUTTONS = {
     CHUNK_MODE_BUTTON: "chunk",
@@ -40,7 +40,7 @@ REQUESTS_POLL_TIMEOUT_SEC = 30
 FAQ_ANSWER_MAX_LEN = 220
 FAQ_MESSAGE_MAX_LEN = 3900
 VERIFICATION_DISABLED_TEXT = "Верификация отключена: токены больше не требуются."
-ANSWER_TIMEOUT_SEC = 45
+ANSWER_TIMEOUT_SEC = settings.answer_timeout_sec
 
 
 def get_pipeline() -> RAGPipeline:
@@ -85,11 +85,7 @@ def get_db():
 
 def is_admin(chat_id: int) -> bool:
     chat_id_int = int(chat_id)
-    if chat_id_int in set(settings.admin_telegram_ids or []):
-        return True
-
-    db_user = get_db().get_user(external_id=str(chat_id_int), source="telegram")
-    return bool((db_user or {}).get("is_admin", False))
+    return chat_id_int in set(settings.admin_telegram_ids or [])
 
 
 def build_mode_keyboard() -> ReplyKeyboardMarkup:
@@ -243,18 +239,12 @@ def _sync_start_handler(chat_id: int) -> None:
 
     if is_admin(chat_id):
         db.set_user_admin(external_id=str(chat_id), source="telegram", value=True)
-        limit_line = "Monthly limit: unlimited (admin)."
-    else:
-        limit_line = f"Monthly limit: {settings.user_monthly_request_limit} requests."
 
     _tg_send_message(
         chat_id,
-        "Select answer mode, then send your question.\n"
-        "Current mode: not selected.\n\n"
-        "Useful commands:\n"
-        "/admin - admin panel link\n"
-        "/faq - show FAQ with answers\n"
-        f"{limit_line}",
+        "Выберете режим,а потом спросите вопрос\n\n"
+        "Полезные команды:\n"
+        "/faq",
         reply_markup=_reply_keyboard_payload(),
     )
 
@@ -270,7 +260,7 @@ def _sync_verify_handler(chat_id: int, text: str) -> None:
 def _sync_admin_handler(chat_id: int) -> None:
     # /admin для requests-backend: просто ссылка на веб-админку.
     if not is_admin(chat_id):
-        _tg_send_message(chat_id, "Access denied.")
+        _tg_send_message(chat_id, "Доступ запрещен.")
         return
 
     admin_text = build_admin_help_text()
@@ -280,7 +270,7 @@ def _sync_admin_handler(chat_id: int) -> None:
 def _sync_admin_stats_handler(chat_id: int, text: str) -> None:
     # Статистика активности за N дней (requests backend).
     if not is_admin(chat_id):
-        _tg_send_message(chat_id, "Access denied.")
+        _tg_send_message(chat_id, "Доступ запрещен.")
         return
 
     raw = _command_arg(text)
@@ -291,10 +281,10 @@ def _sync_admin_stats_handler(chat_id: int, text: str) -> None:
 
     rows = get_db().activity_series(days=days)
     if not rows:
-        _tg_send_message(chat_id, "No activity data (DB unavailable or empty).")
+        _tg_send_message(chat_id, "Нет данных активности (БД недоступна или пуста).")
         return
 
-    lines = [f"Activity for last {days} days:"]
+    lines = [f"Активность за последние {days} дн.:"]
     for row in rows:
         lines.append(f"{row['day']}: {row['count']}")
 
@@ -304,7 +294,7 @@ def _sync_admin_stats_handler(chat_id: int, text: str) -> None:
 def _sync_admin_new_users_handler(chat_id: int, text: str) -> None:
     # Статистика новых пользователей за N дней (requests backend).
     if not is_admin(chat_id):
-        _tg_send_message(chat_id, "Access denied.")
+        _tg_send_message(chat_id, "Доступ запрещен.")
         return
 
     raw = _command_arg(text)
@@ -315,10 +305,10 @@ def _sync_admin_new_users_handler(chat_id: int, text: str) -> None:
 
     rows = get_db().new_users_series(days=days)
     if not rows:
-        _tg_send_message(chat_id, "No user data (DB unavailable or empty).")
+        _tg_send_message(chat_id, "Нет данных по пользователям (БД недоступна или пуста).")
         return
 
-    lines = [f"New users for last {days} days:"]
+    lines = [f"Новые пользователи за последние {days} дн.:"]
     for row in rows:
         lines.append(f"{row['day']}: {row['count']}")
 
@@ -328,7 +318,7 @@ def _sync_admin_new_users_handler(chat_id: int, text: str) -> None:
 def _sync_admin_tokens_handler(chat_id: int, text: str) -> None:
     # Список последних токенов (requests backend).
     if not is_admin(chat_id):
-        _tg_send_message(chat_id, "Access denied.")
+        _tg_send_message(chat_id, "Доступ запрещен.")
         return
 
     raw = _command_arg(text)
@@ -339,10 +329,10 @@ def _sync_admin_tokens_handler(chat_id: int, text: str) -> None:
 
     rows = get_db().list_tokens(limit=limit)
     if not rows:
-        _tg_send_message(chat_id, "No token data (DB unavailable or empty).")
+        _tg_send_message(chat_id, "Нет данных по токенам (БД недоступна или пуста).")
         return
 
-    lines = [f"Latest {limit} tokens:"]
+    lines = [f"Последние {limit} токенов:"]
     for row in rows:
         status = "active" if row.get("active") else "disabled"
         lines.append(f"{row.get('source')}:{row.get('external_id')} | {status} | {row.get('token')}")
@@ -353,117 +343,117 @@ def _sync_admin_tokens_handler(chat_id: int, text: str) -> None:
 def _sync_admin_activate_handler(chat_id: int, text: str) -> None:
     # Активация токена (requests backend).
     if not is_admin(chat_id):
-        _tg_send_message(chat_id, "Access denied.")
+        _tg_send_message(chat_id, "Доступ запрещен.")
         return
 
     token = _command_arg(text)
     if not token:
-        _tg_send_message(chat_id, "Usage: /admin_activate <token>")
+        _tg_send_message(chat_id, "Использование: /admin_activate <token>")
         return
 
     ok = get_db().set_token_active(token=token, active=True)
-    _tg_send_message(chat_id, "Token activated." if ok else "Token not found / DB unavailable.")
+    _tg_send_message(chat_id, "Токен активирован." if ok else "Токен не найден / БД недоступна.")
 
 
 def _sync_admin_deactivate_handler(chat_id: int, text: str) -> None:
     # Деактивация токена (requests backend).
     if not is_admin(chat_id):
-        _tg_send_message(chat_id, "Access denied.")
+        _tg_send_message(chat_id, "Доступ запрещен.")
         return
 
     token = _command_arg(text)
     if not token:
-        _tg_send_message(chat_id, "Usage: /admin_deactivate <token>")
+        _tg_send_message(chat_id, "Использование: /admin_deactivate <token>")
         return
 
     ok = get_db().set_token_active(token=token, active=False)
-    _tg_send_message(chat_id, "Token deactivated." if ok else "Token not found / DB unavailable.")
+    _tg_send_message(chat_id, "Токен деактивирован." if ok else "Токен не найден / БД недоступна.")
 
 
 def _sync_admin_make_admin_handler(chat_id: int, text: str) -> None:
     # Назначение admin роли пользователю (requests backend).
     if not is_admin(chat_id):
-        _tg_send_message(chat_id, "Access denied.")
+        _tg_send_message(chat_id, "Доступ запрещен.")
         return
 
     parsed = _parse_source_external(text)
     if not parsed:
-        _tg_send_message(chat_id, "Usage: /admin_make_admin <source> <external_id>")
+        _tg_send_message(chat_id, "Использование: /admin_make_admin <source> <external_id>")
         return
 
     source, external_id = parsed
     get_db().set_user_admin(external_id=external_id, source=source, value=True)
-    _tg_send_message(chat_id, f"Admin role granted: {source}:{external_id}")
+    _tg_send_message(chat_id, f"Роль admin выдана: {source}:{external_id}")
 
 
 def _sync_admin_remove_admin_handler(chat_id: int, text: str) -> None:
     # Снятие admin роли (requests backend).
     if not is_admin(chat_id):
-        _tg_send_message(chat_id, "Access denied.")
+        _tg_send_message(chat_id, "Доступ запрещен.")
         return
 
     parsed = _parse_source_external(text)
     if not parsed:
-        _tg_send_message(chat_id, "Usage: /admin_remove_admin <source> <external_id>")
+        _tg_send_message(chat_id, "Использование: /admin_remove_admin <source> <external_id>")
         return
 
     source, external_id = parsed
     get_db().set_user_admin(external_id=external_id, source=source, value=False)
-    _tg_send_message(chat_id, f"Admin role removed: {source}:{external_id}")
+    _tg_send_message(chat_id, f"Роль admin снята: {source}:{external_id}")
 
 
 def _sync_admin_add_tokens_handler(chat_id: int, text: str) -> None:
     # Добавление бонусных токенов (к месячному лимиту).
     if not is_admin(chat_id):
-        _tg_send_message(chat_id, "Access denied.")
+        _tg_send_message(chat_id, "Доступ запрещен.")
         return
 
     parsed = _parse_source_external_amount(text)
     if not parsed:
-        _tg_send_message(chat_id, "Usage: /admin_add_tokens <source> <external_id> <amount>")
+        _tg_send_message(chat_id, "Использование: /admin_add_tokens <source> <external_id> <amount>")
         return
 
     source, external_id, amount = parsed
     new_balance = get_db().adjust_user_bonus_tokens(external_id=external_id, source=source, delta=amount)
     if new_balance is None:
-        _tg_send_message(chat_id, "DB unavailable.")
+        _tg_send_message(chat_id, "БД недоступна.")
         return
     effective_limit = settings.user_monthly_request_limit + new_balance
     _tg_send_message(
         chat_id,
-        f"Bonus tokens updated: {source}:{external_id} => {new_balance}. "
-        f"Effective monthly limit: {effective_limit}.",
+        f"Бонусные токены обновлены: {source}:{external_id} => {new_balance}. "
+        f"Эффективный месячный лимит: {effective_limit}.",
     )
 
 
 def _sync_admin_take_tokens_handler(chat_id: int, text: str) -> None:
     # Снятие бонусных токенов (из месячного лимита, не ниже нуля).
     if not is_admin(chat_id):
-        _tg_send_message(chat_id, "Access denied.")
+        _tg_send_message(chat_id, "Доступ запрещен.")
         return
 
     parsed = _parse_source_external_amount(text)
     if not parsed:
-        _tg_send_message(chat_id, "Usage: /admin_take_tokens <source> <external_id> <amount>")
+        _tg_send_message(chat_id, "Использование: /admin_take_tokens <source> <external_id> <amount>")
         return
 
     source, external_id, amount = parsed
     new_balance = get_db().adjust_user_bonus_tokens(external_id=external_id, source=source, delta=-amount)
     if new_balance is None:
-        _tg_send_message(chat_id, "DB unavailable.")
+        _tg_send_message(chat_id, "БД недоступна.")
         return
     effective_limit = settings.user_monthly_request_limit + new_balance
     _tg_send_message(
         chat_id,
-        f"Bonus tokens updated: {source}:{external_id} => {new_balance}. "
-        f"Effective monthly limit: {effective_limit}.",
+        f"Бонусные токены обновлены: {source}:{external_id} => {new_balance}. "
+        f"Эффективный месячный лимит: {effective_limit}.",
     )
 
 
 def _sync_question_handler(chat_id: int, question: str) -> None:
     mode = get_chat_mode(chat_id)
     if mode not in {"chunk", "entity"}:
-        _tg_send_message(chat_id, "Выберите режим и задайте вопрос")
+        _tg_send_message(chat_id, "Выберете режим,а потом спросите вопрос")
         return
     if not is_pipeline_ready():
         _tg_send_message(chat_id, "Сервис прогревается. Повторите вопрос через 10-20 секунд.")
@@ -482,11 +472,11 @@ def _sync_question_handler(chat_id: int, question: str) -> None:
     if not quota.get("allowed", True):
         _tg_send_message(
             chat_id,
-            f"Monthly limit reached: {quota.get('used', 0)} / {quota.get('limit', settings.user_monthly_request_limit)}.",
+            f"Лимит исчерпан: {quota.get('used', 0)} / {quota.get('limit', settings.user_monthly_request_limit)}.",
         )
         return
 
-    _tg_send_message(chat_id, f"Processing your question in {mode} mode...")
+    _tg_send_message(chat_id, "Обрабатываю ваш вопрос...")
 
     try:
         started = time.perf_counter()
@@ -508,10 +498,10 @@ def _sync_question_handler(chat_id: int, question: str) -> None:
         _tg_send_message(chat_id, f"Превышено время ожидания ответа ({ANSWER_TIMEOUT_SEC} сек). Попробуйте еще раз.")
         return
     except Exception as exc:
-        _tg_send_message(chat_id, f"Processing error: {exc}")
+        _tg_send_message(chat_id, f"Ошибка обработки: {exc}")
         return
 
-    mode_title = "ChunkBased" if mode == "chunk" else "EntityBased"
+    mode_title = "Поиск по фрагментам текста" if mode == "chunk" else "Поиск по сущностям"
     response_text = f"Режим: {mode_title}\n\n{answer}{format_primary_hit(result.get('hits', []))}"
     _tg_send_message(chat_id, response_text)
 
@@ -533,7 +523,7 @@ def _handle_text_update_sync(chat_id: int, text: str) -> None:
     if raw in MODE_BUTTONS:
         mode = MODE_BUTTONS[raw]
         set_chat_mode(chat_id, mode)
-        _tg_send_message(chat_id, f"Mode switched to: {raw}")
+        _tg_send_message(chat_id, f"Теперь вы используете: {raw}")
         _tg_send_message(chat_id, "Вы можете задать свой вопрос")
         return
     if raw == FAQ_BUTTON:
@@ -542,12 +532,12 @@ def _handle_text_update_sync(chat_id: int, text: str) -> None:
 
     if command in {"/chunk", "/chunkbased"}:
         set_chat_mode(chat_id, "chunk")
-        _tg_send_message(chat_id, "Mode switched to: ChunkBased")
+        _tg_send_message(chat_id, "Теперь вы используете: Режим поиска по фрагментам текста")
         _tg_send_message(chat_id, "Вы можете задать свой вопрос")
         return
     if command in {"/entity", "/entitybased"}:
         set_chat_mode(chat_id, "entity")
-        _tg_send_message(chat_id, "Mode switched to: EntityBased")
+        _tg_send_message(chat_id, "Теперь вы используете: Режим поиска по сущностям")
         _tg_send_message(chat_id, "Вы можете задать свой вопрос")
         return
 
@@ -594,7 +584,7 @@ def _handle_text_update_sync(chat_id: int, text: str) -> None:
         _sync_faq_handler(chat_id)
         return
     if command.startswith("/"):
-        _tg_send_message(chat_id, "Выберите режим и задайте вопрос")
+        _tg_send_message(chat_id, "Выберете режим,а потом спросите вопрос")
         return
 
     _sync_question_handler(chat_id, raw)
@@ -666,17 +656,11 @@ async def start_handler(message: Message) -> None:
     db.register_user(external_id=str(chat_id), source="telegram")
     if is_admin(chat_id):
         db.set_user_admin(external_id=str(chat_id), source="telegram", value=True)
-        limit_line = "Monthly limit: unlimited (admin)."
-    else:
-        limit_line = f"Monthly limit: {settings.user_monthly_request_limit} requests."
 
     await message.answer(
-        "Select answer mode, then send your question.\n"
-        "Current mode: not selected.\n\n"
-        "Useful commands:\n"
-        "/admin - admin panel link\n"
-        "/faq - show FAQ with answers\n"
-        f"{limit_line}",
+        "Выберете режим,а потом спросите вопрос\n\n"
+        "Полежные команды:\n"
+        "/faq",
         reply_markup=build_mode_keyboard(),
     )
 
@@ -687,7 +671,7 @@ async def mode_handler(message: Message) -> None:
     if not mode:
         return
     set_chat_mode(message.chat.id, mode)
-    await message.answer(f"Mode switched to: {message.text}")
+    await message.answer(f"Теперь вы используете: {message.text}")
     await message.answer("Вы можете задать свой вопрос")
 
 
@@ -708,13 +692,13 @@ async def verify_handler(message: Message) -> None:
 
 async def unknown_command_handler(message: Message) -> None:
     # Для любых неизвестных команд не оставляем пользователя без понятного шага.
-    await message.answer("Выберите режим и задайте вопрос")
+    await message.answer("Выберете режим,а потом спросите вопрос")
 
 
 async def admin_mini_handler(message: Message) -> None:
     # /admin: просто ссылка на веб-админку.
     if not is_admin(message.chat.id):
-        await message.answer("Access denied.")
+        await message.answer("Доступ запрещен.")
         return
 
     admin_text = build_admin_help_text()
@@ -724,7 +708,7 @@ async def admin_mini_handler(message: Message) -> None:
 async def admin_stats_handler(message: Message) -> None:
     # График активности (в текстовом виде) за период.
     if not is_admin(message.chat.id):
-        await message.answer("Access denied.")
+        await message.answer("Доступ запрещен.")
         return
 
     raw = _command_arg(message.text or "")
@@ -735,10 +719,10 @@ async def admin_stats_handler(message: Message) -> None:
 
     rows = get_db().activity_series(days=days)
     if not rows:
-        await message.answer("No activity data (DB unavailable or empty).")
+        await message.answer("Нет данных активности (БД недоступна или пуста).")
         return
 
-    lines = [f"Activity for last {days} days:"]
+    lines = [f"Активность за последние {days} дн.:"]
     for row in rows:
         lines.append(f"{row['day']}: {row['count']}")
 
@@ -748,7 +732,7 @@ async def admin_stats_handler(message: Message) -> None:
 async def admin_new_users_handler(message: Message) -> None:
     # График новых пользователей (в текстовом виде) за период.
     if not is_admin(message.chat.id):
-        await message.answer("Access denied.")
+        await message.answer("Доступ запрещен.")
         return
 
     raw = _command_arg(message.text or "")
@@ -759,10 +743,10 @@ async def admin_new_users_handler(message: Message) -> None:
 
     rows = get_db().new_users_series(days=days)
     if not rows:
-        await message.answer("No user data (DB unavailable or empty).")
+        await message.answer("Нет данных по пользователям (БД недоступна или пуста).")
         return
 
-    lines = [f"New users for last {days} days:"]
+    lines = [f"Новые пользователи за последние {days} дн.:"]
     for row in rows:
         lines.append(f"{row['day']}: {row['count']}")
 
@@ -772,7 +756,7 @@ async def admin_new_users_handler(message: Message) -> None:
 async def admin_tokens_handler(message: Message) -> None:
     # Просмотр последних токенов.
     if not is_admin(message.chat.id):
-        await message.answer("Access denied.")
+        await message.answer("Доступ запрещен.")
         return
 
     raw = _command_arg(message.text or "")
@@ -783,10 +767,10 @@ async def admin_tokens_handler(message: Message) -> None:
 
     rows = get_db().list_tokens(limit=limit)
     if not rows:
-        await message.answer("No token data (DB unavailable or empty).")
+        await message.answer("Нет данных по токенам (БД недоступна или пуста).")
         return
 
-    lines = [f"Latest {limit} tokens:"]
+    lines = [f"Последние {limit} токенов:"]
     for row in rows:
         status = "active" if row.get("active") else "disabled"
         lines.append(f"{row.get('source')}:{row.get('external_id')} | {status} | {row.get('token')}")
@@ -797,110 +781,110 @@ async def admin_tokens_handler(message: Message) -> None:
 async def admin_deactivate_handler(message: Message) -> None:
     # Деактивация токена админом: /admin_deactivate <token>.
     if not is_admin(message.chat.id):
-        await message.answer("Access denied.")
+        await message.answer("Доступ запрещен.")
         return
 
     token = _command_arg(message.text or "")
     if not token:
-        await message.answer("Usage: /admin_deactivate <token>")
+        await message.answer("Использование: /admin_deactivate <token>")
         return
 
     ok = get_db().set_token_active(token=token, active=False)
-    await message.answer("Token deactivated." if ok else "Token not found / DB unavailable.")
+    await message.answer("Токен деактивирован." if ok else "Токен не найден / БД недоступна.")
 
 
 async def admin_activate_handler(message: Message) -> None:
     # Активация токена админом: /admin_activate <token>.
     if not is_admin(message.chat.id):
-        await message.answer("Access denied.")
+        await message.answer("Доступ запрещен.")
         return
 
     token = _command_arg(message.text or "")
     if not token:
-        await message.answer("Usage: /admin_activate <token>")
+        await message.answer("Использование: /admin_activate <token>")
         return
 
     ok = get_db().set_token_active(token=token, active=True)
-    await message.answer("Token activated." if ok else "Token not found / DB unavailable.")
+    await message.answer("Токен активирован." if ok else "Токен не найден / БД недоступна.")
 
 
 async def admin_make_admin_handler(message: Message) -> None:
     # Назначение admin роли пользователю: /admin_make_admin <source> <external_id>.
     if not is_admin(message.chat.id):
-        await message.answer("Access denied.")
+        await message.answer("Доступ запрещен.")
         return
 
     parsed = _parse_source_external(message.text or "")
     if not parsed:
-        await message.answer("Usage: /admin_make_admin <source> <external_id>")
+        await message.answer("Использование: /admin_make_admin <source> <external_id>")
         return
 
     source, external_id = parsed
     get_db().set_user_admin(external_id=external_id, source=source, value=True)
-    await message.answer(f"Admin role granted: {source}:{external_id}")
+    await message.answer(f"Роль admin выдана: {source}:{external_id}")
 
 
 async def admin_remove_admin_handler(message: Message) -> None:
     # Снятие admin роли: /admin_remove_admin <source> <external_id>.
     if not is_admin(message.chat.id):
-        await message.answer("Access denied.")
+        await message.answer("Доступ запрещен.")
         return
 
     parsed = _parse_source_external(message.text or "")
     if not parsed:
-        await message.answer("Usage: /admin_remove_admin <source> <external_id>")
+        await message.answer("Использование: /admin_remove_admin <source> <external_id>")
         return
 
     source, external_id = parsed
     get_db().set_user_admin(external_id=external_id, source=source, value=False)
-    await message.answer(f"Admin role removed: {source}:{external_id}")
+    await message.answer(f"Роль admin снята: {source}:{external_id}")
 
 
 async def admin_add_tokens_handler(message: Message) -> None:
     # Добавление бонусных токенов к месячному лимиту.
     if not is_admin(message.chat.id):
-        await message.answer("Access denied.")
+        await message.answer("Доступ запрещен.")
         return
 
     parsed = _parse_source_external_amount(message.text or "")
     if not parsed:
-        await message.answer("Usage: /admin_add_tokens <source> <external_id> <amount>")
+        await message.answer("Использование: /admin_add_tokens <source> <external_id> <amount>")
         return
 
     source, external_id, amount = parsed
     new_balance = get_db().adjust_user_bonus_tokens(external_id=external_id, source=source, delta=amount)
     if new_balance is None:
-        await message.answer("DB unavailable.")
+        await message.answer("БД недоступна.")
         return
 
     effective_limit = settings.user_monthly_request_limit + new_balance
     await message.answer(
-        f"Bonus tokens updated: {source}:{external_id} => {new_balance}. "
-        f"Effective monthly limit: {effective_limit}."
+        f"Бонусные токены обновлены: {source}:{external_id} => {new_balance}. "
+        f"Эффективный месячный лимит: {effective_limit}."
     )
 
 
 async def admin_take_tokens_handler(message: Message) -> None:
     # Снятие бонусных токенов из месячного лимита.
     if not is_admin(message.chat.id):
-        await message.answer("Access denied.")
+        await message.answer("Доступ запрещен.")
         return
 
     parsed = _parse_source_external_amount(message.text or "")
     if not parsed:
-        await message.answer("Usage: /admin_take_tokens <source> <external_id> <amount>")
+        await message.answer("Использование: /admin_take_tokens <source> <external_id> <amount>")
         return
 
     source, external_id, amount = parsed
     new_balance = get_db().adjust_user_bonus_tokens(external_id=external_id, source=source, delta=-amount)
     if new_balance is None:
-        await message.answer("DB unavailable.")
+        await message.answer("БД недоступна.")
         return
 
     effective_limit = settings.user_monthly_request_limit + new_balance
     await message.answer(
-        f"Bonus tokens updated: {source}:{external_id} => {new_balance}. "
-        f"Effective monthly limit: {effective_limit}."
+        f"Бонусные токены обновлены: {source}:{external_id} => {new_balance}. "
+        f"Эффективный месячный лимит: {effective_limit}."
     )
 
 
@@ -909,12 +893,12 @@ async def question_handler(message: Message) -> None:
     chat_id = message.chat.id
     question = (message.text or "").strip()
     if not question:
-        await message.answer("Please send a non-empty question.")
+        await message.answer("Отправьте непустой вопрос.")
         return
 
     mode = get_chat_mode(chat_id)
     if mode not in {"chunk", "entity"}:
-        await message.answer("Выберите режим и задайте вопрос")
+        await message.answer("Выберете режим,а потом спросите вопрос")
         return
     if not is_pipeline_ready():
         await message.answer("Сервис прогревается. Повторите вопрос через 10-20 секунд.")
@@ -932,12 +916,12 @@ async def question_handler(message: Message) -> None:
     )
     if not quota.get("allowed", True):
         await message.answer(
-            f"Monthly limit reached: {quota.get('used', 0)} / {quota.get('limit', settings.user_monthly_request_limit)}."
+            f"Лимит исчерпан: {quota.get('used', 0)} / {quota.get('limit', settings.user_monthly_request_limit)}."
         )
         return
 
     # Первый запрос может быть медленнее, потому что пайплайн инициализируется лениво.
-    await message.answer(f"Processing your question in {mode} mode...")
+    await message.answer("Обрабатываю ваш вопрос...")
 
     try:
         started = time.perf_counter()
@@ -959,10 +943,10 @@ async def question_handler(message: Message) -> None:
         await message.answer(f"Превышено время ожидания ответа ({ANSWER_TIMEOUT_SEC} сек). Попробуйте еще раз.")
         return
     except Exception as exc:
-        await message.answer(f"Processing error: {exc}")
+        await message.answer(f"Ошибка обработки: {exc}")
         return
 
-    mode_title = "ChunkBased" if mode == "chunk" else "EntityBased"
+    mode_title = "Поиск по фрагментам текста" if mode == "chunk" else "Поиск по сущностям"
     response_text = f"Режим: {mode_title}\n\n{answer}{format_primary_hit(result.get('hits', []))}"
     # Жесткий лимит сообщения Telegram — 4096 символов.
     await message.answer(response_text[:4000])
@@ -1025,6 +1009,7 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

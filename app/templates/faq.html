@@ -39,9 +39,9 @@
           <div class="muted">Первые 10 — фиксированная база. Следующие 10 — динамика по последним вопросам пользователей.</div>
         </div>
         <div class="toolbar">
-          <a href="{{ index_url }}">QA</a>
+          <a href="{{ index_url }}">Спросить вопрос</a>
           {% if auth_user %}
-            <span class="muted">Пользователь: <b>{{ auth_user.username }}</b>{% if is_admin %} (admin){% endif %}</span>
+            <span class="muted">Пользователь: <b>{{ auth_user.username }}</b>{% if is_admin %} (админ){% endif %}</span>
             <a href="{{ auth_logout_url }}">Выйти</a>
           {% else %}
             <a href="{{ auth_login_url }}">Авторизация</a>

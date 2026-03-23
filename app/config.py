@@ -39,7 +39,11 @@ class Settings:
     llm_model: str = os.getenv("LLM_MODEL", "llama3.2:2b")
     ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
     llm_timeout_sec: int = int(os.getenv("LLM_TIMEOUT_SEC", "30"))
+    answer_timeout_sec: int = int(os.getenv("ANSWER_TIMEOUT_SEC", "180"))
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+    qa_memory_enabled: bool = _as_bool(os.getenv("QA_MEMORY_ENABLED", "1"), default=True)
+    qa_dataset_path: str = os.getenv("QA_DATASET_PATH", "./обучение ллм/dataset_eval_top2500_best.json")
+    qa_memory_top_k: int = int(os.getenv("QA_MEMORY_TOP_K", "1"))
 
     # Retrieval настройки.
     chroma_path: str = os.getenv("CHROMA_PATH", "./chroma_db")
@@ -89,6 +93,9 @@ class Settings:
         self.llm_provider = (self.llm_provider or "echo").strip().lower()
         self.llm_model = (self.llm_model or "").strip()
         self.ollama_base_url = (self.ollama_base_url or "").strip()
+        self.answer_timeout_sec = max(30, int(self.answer_timeout_sec))
+        self.qa_dataset_path = (self.qa_dataset_path or "").strip()
+        self.qa_memory_top_k = max(1, int(self.qa_memory_top_k))
         self.chunk_splitter_mode = (self.chunk_splitter_mode or "smart").strip().lower() or "smart"
         self.chunk_mmr_lambda = max(0.0, min(1.0, float(self.chunk_mmr_lambda)))
         self.entity_mmr_lambda = max(0.0, min(1.0, float(self.entity_mmr_lambda)))
