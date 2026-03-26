@@ -10,6 +10,97 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, List, Sequence
 from xml.sax.saxutils import escape
+import requests
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+class LLMJudge:
+    def __init__(self, judge_model: str = None, timeout_sec: int = 180, warmup: bool = True):
+        self.ollama_url = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip('/')
+        self.model = judge_model or os.getenv("LLM_MODEL", "qwen3:8b")
+        self.temperature = 0.0
+        self.timeout = timeout_sec
+        if warmup:
+            self._warmup()
+
+    def _call_ollama(self, prompt: str) -> str:
+        url = f"{self.ollama_url}/api/generate"
+        payload = {
+            "model": self.model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {"temperature": self.temperature}
+        }
+        try:
+            response = requests.post(url, json=payload, timeout=self.timeout)
+            response.raise_for_status()
+            data = response.json()
+            return data.get("response", "").strip()
+        except Exception as e:
+            print(f"Ошибка при вызове Ollama: {e}")
+            return ""
+
+    def _warmup(self):
+        """Прогрев модели перед началом работы."""
+        try:
+            print(f"Прогрев модели {self.model}...")
+            self._call_ollama("Привет")
+            print("Модель готова.")
+        except Exception as e:
+            print(f"Прогрев не удался: {e}")
+
+    def score(self, question: str, expected: str, generated: str) -> tuple[float, float, str]:
+        prompt = f"""Ты — строгий эксперт по оценке качества ответов на вопросы по правилам дорожного движения.
+Оцени сгенерированный ответ по трём критериям:
+- Точность (соответствие фактам ПДД, отсутствие ошибок) – 40%
+- Полнота (охватывает ли ответ ключевые моменты) – 30%
+- Релевантность (отвечает ли непосредственно на вопрос) – 30%
+
+Вопрос: {question}
+Эталонный ответ: {expected}
+Сгенерированный ответ: {generated}
+
+Выставь итоговую оценку по шкале от 1 до 10 (целое число) и краткий комментарий.
+Формат ответа:
+Оценка: X
+Комментарий: ... (кратко, почему такая оценка)
+
+Примеры комментариев:
+- "Ответ верный, но не упомянута табличка 8.13."
+- "Ответ содержит грубую ошибку (названа не та статья)."
+- "Точный и полный ответ."
+- "Отлично, приведены все детали."
+"""
+        try:
+            response = self._call_ollama(prompt)
+            if not response:
+                from scripts.chunk_settings_benchmark import SemanticJudge
+                return SemanticJudge().score(question, expected, generated)
+
+            # Поиск оценки
+            match = re.search(r'Оценка:\s*(\d+(?:\.\d+)?)', response)
+            if not match:
+                match = re.search(r'Score:\s*(\d+(?:\.\d+)?)', response, re.IGNORECASE)
+            score = float(match.group(1)) if match else 5.0
+            score = min(10.0, max(1.0, score))
+
+            # Поиск комментария
+            comment = ""
+            if "Комментарий:" in response:
+                comment = response.split("Комментарий:", 1)[1].strip()
+            elif "Comment:" in response:
+                comment = response.split("Comment:", 1)[1].strip()
+
+            score10 = round(score, 2)
+            score01 = round(score10 / 10.0, 4)
+            return score01, score10, comment
+
+        except Exception as e:
+            print(f"LLMJudge error: {e}, falling back to SemanticJudge")
+            from scripts.chunk_settings_benchmark import SemanticJudge
+            return SemanticJudge().score(question, expected, generated)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -412,7 +503,7 @@ def main() -> None:
         questions = questions[:limit]
 
     grid = settings_grid()
-    judge = SemanticJudge()
+    judge = LLMJudge(judge_model="llama3.2:3b")
 
     summary_items: List[dict[str, Any]] = []
     details_rows: List[List[str]] = [[
