@@ -73,6 +73,7 @@ class Settings:
     admin_web_password: str = os.getenv("ADMIN_WEB_PASSWORD", "")
     admin_default_days: int = int(os.getenv("ADMIN_DEFAULT_DAYS", "14"))
     public_base_url: str = os.getenv("PUBLIC_BASE_URL", "").strip()
+    books_public_base_url: str = os.getenv("BOOKS_PUBLIC_BASE_URL", "").strip()
     mini_admin_ttl_sec: int = int(os.getenv("MINI_ADMIN_TTL_SEC", "900"))
     user_monthly_request_limit: int = int(os.getenv("USER_MONTHLY_REQUEST_LIMIT", "100"))
 

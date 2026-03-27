@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>CSU FAQ</title>
+  <title>DOMAIN OF KNOWLEDGE CSU</title>
   <style>
     :root {
       --bg: #f1f5f9;
@@ -69,6 +69,16 @@
       padding: 10px;
       margin-top: 10px;
     }
+    a.source-attribution-card {
+      display: block;
+      text-decoration: none;
+      color: inherit;
+      transition: background-color .12s ease, border-color .12s ease;
+    }
+    a.source-attribution-card:hover {
+      background: #eef6ff;
+      border-color: #93c5fd;
+    }
     .source-attribution-title {
       font-weight: 700;
       color: #0f766e;
@@ -81,6 +91,19 @@
     .source-attribution-snippet {
       margin-top: 8px;
       line-height: 1.45;
+    }
+    .source-download-row {
+      margin-top: 8px;
+    }
+    .source-download-link {
+      display: inline-block;
+      text-decoration: none;
+      font-size: 12px;
+      color: #0f766e;
+      border: 1px solid #99f6e4;
+      background: #f0fdfa;
+      border-radius: 8px;
+      padding: 4px 8px;
     }
     .toolbar {
       display: flex;
@@ -112,9 +135,9 @@
     <div class="card">
       <div class="toprow">
         <div>
-          <h1>CSU FAQ</h1>
+          <h1>DOMAIN OF KNOWLEDGE CSU</h1>
           {% if monthly_unlimited %}
-            <div class="muted">Лимит: без ограничений (admin). Использовано в этом месяце: {{ monthly_used }}.</div>
+            <div class="muted">Лимит: без ограничений (админ). Использовано в этом месяце: {{ monthly_used }}.</div>
           {% else %}
             <div class="muted">Лимит: {{ monthly_used }} / {{ monthly_limit }} запросов в этом месяце (осталось {{ monthly_remaining }}).</div>
           {% endif %}
@@ -122,7 +145,7 @@
         <div class="toolbar">
           <a href="{{ faq_url }}">FAQ</a>
           {% if auth_user %}
-            <span class="muted">Пользователь: <b>{{ auth_user.username }}</b>{% if is_admin %} (admin){% endif %}</span>
+            <span class="muted">Пользователь: <b>{{ auth_user.username }}</b>{% if is_admin %} (админ){% endif %}</span>
             <a href="{{ auth_logout_url }}">Выйти</a>
           {% else %}
             <a href="{{ auth_login_url }}">Авторизоваться</a>
@@ -146,8 +169,8 @@
           <div>
             <label for="mode">Режим:</label>
             <select name="mode" id="mode">
-              <option value="chunk" {% if mode == "chunk" %}selected{% endif %}>ChunkBased</option>
-              <option value="entity" {% if mode == "entity" %}selected{% endif %}>EntityBased</option>
+              <option value="chunk" {% if mode == "chunk" %}selected{% endif %}>Режим поиска по фрагментам текста</option>
+              <option value="entity" {% if mode == "entity" %}selected{% endif %}>Режим поиска по сущностям</option>
             </select>
           </div>
         </div>
@@ -169,14 +192,20 @@
       {% if basis_cards %}
         {% for card in basis_cards %}
         <div class="source-attribution-card">
+        {% if card.open_url %}
+          <a href="{{ card.open_url }}" target="_blank" rel="noopener noreferrer" title="Открыть источник" style="text-decoration:none;color:inherit;display:block;">
+            <div class="source-attribution-title">{{ card.title }}</div>
+            <div class="source-attribution-snippet">{{ snippet(card.text) }}</div>
+          </a>
+        {% else %}
           <div class="source-attribution-title">{{ card.title }}</div>
-          <div class="source-attribution-meta">
-            score={{ "%.4f"|format(card.score) }} | source={{ card.source }}
-            {% if card.entities %}
-            | entities={{ ", ".join(card.entities[:10]) }}
-            {% endif %}
-          </div>
           <div class="source-attribution-snippet">{{ snippet(card.text) }}</div>
+        {% endif %}
+          {% if card.download_url %}
+          <div class="source-download-row">
+            <a class="source-download-link" href="{{ card.download_url }}">Скачать источник</a>
+          </div>
+          {% endif %}
         </div>
         {% endfor %}
       {% else %}

@@ -5,9 +5,11 @@ import json
 import threading
 import time
 import uuid
+from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
-from flask import Flask, abort, make_response, redirect, render_template, request, session, url_for
+from flask import Flask, abort, make_response, redirect, render_template, request, send_from_directory, session, url_for
 
 from app.access_tokens import verify_signed_payload
 from app.config import settings
@@ -22,6 +24,11 @@ _pipeline: RAGPipeline | None = None
 _pipeline_lock = threading.Lock()
 _pipeline_ready = threading.Event()
 ANSWER_TIMEOUT_SEC = 45
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+SOURCE_DIRS = [
+    PROJECT_ROOT / "harry_potter",
+    PROJECT_ROOT / "гражданский кодекс",
+]
 
 
 # -------------------------
@@ -49,6 +56,65 @@ def _snippet(text: str, limit: int = 260) -> str:
     if len(compact) <= limit:
         return compact
     return f"{compact[:limit]}..."
+
+
+def _resolve_source_file(source: str) -> Path | None:
+    # Разрешаем открывать только реальные файлы из доверенных папок.
+    name = Path(str(source or "")).name
+    if not name:
+        return None
+    for folder in SOURCE_DIRS:
+        candidate = folder / name
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    return None
+
+
+def _build_source_open_url(card: dict[str, Any]) -> str | None:
+    source = str(card.get("source") or "").strip()
+    source_path = _resolve_source_file(source)
+    if source_path is None:
+        return None
+
+    page_raw = card.get("page")
+    try:
+        page = max(1, int(page_raw)) if page_raw is not None else 1
+    except Exception:
+        page = 1
+
+    # Передаем первую осмысленную фразу в search, чтобы PDF viewer подсветил/нашел текст.
+    raw_text = " ".join(str(card.get("text") or "").split())
+    search_text = ""
+    if raw_text:
+        for sep in [". ", "! ", "? ", "; ", "\n"]:
+            if sep in raw_text:
+                search_text = raw_text.split(sep, 1)[0].strip()
+                break
+        if not search_text:
+            search_text = raw_text[:180].strip()
+    search_text = search_text[:180]
+    fragment = f"#page={page}"
+    if search_text:
+        fragment += f"&search={quote(search_text)}"
+
+    return f"{url_for('source_file', filename=source_path.name)}{fragment}"
+
+
+def _build_source_download_url(card: dict[str, Any]) -> str | None:
+    source = str(card.get("source") or "").strip()
+    if not source:
+        return None
+
+    # При наличии внешней базы (GitHub raw) отдаем прямую ссылку на скачивание книги.
+    books_base = (settings.books_public_base_url or "").strip().rstrip("/")
+    if books_base:
+        from urllib.parse import quote
+        return f"{books_base}/{quote(Path(source).name, safe='')}"
+
+    source_path = _resolve_source_file(source)
+    if source_path is None:
+        return None
+    return f"{url_for('source_file', filename=source_path.name)}?download=1"
 
 
 def _build_faq_rows_with_answers(rows: list[dict[str, Any]], mode: str = "chunk") -> list[dict[str, Any]]:
@@ -149,7 +215,7 @@ def _normalize_user_source(raw: str, *, allow_guest: bool = False) -> str:
 def _answer_with_timeout(query: str, mode: str) -> dict[str, Any]:
     # Не даем зависать запросу слишком долго: при timeout не ждем завершения фонового потока.
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    future = executor.submit(get_pipeline().answer, query=query, top_k=1, mode=mode)
+    future = executor.submit(get_pipeline().answer, query=query, top_k=3, mode=mode)
     try:
         return future.result(timeout=ANSWER_TIMEOUT_SEC)
     except concurrent.futures.TimeoutError:
@@ -253,7 +319,7 @@ def index() -> str:
     result: dict[str, Any] | None = None
     basis_hits: list[dict[str, Any]] = []
     basis_cards: list[dict[str, Any]] = []
-    basis_label = "ChunkBased"
+    basis_label = "Режим поиска по фрагментам текста"
     error = ""
     query = ""
     mode = "chunk"
@@ -312,7 +378,10 @@ def index() -> str:
         # Показ фрагментов, на которых основан ответ.
         basis_hits = (result.get("hits", []) or [])[:1]
         basis_cards = [SourceAttributionFormatter.to_card(hit) for hit in basis_hits]
-        basis_label = "EntityBased (TF-IDF + entities)" if mode == "entity" else "ChunkBased"
+        for card in basis_cards:
+            card["open_url"] = _build_source_open_url(card)
+            card["download_url"] = _build_source_download_url(card)
+        basis_label = "Режим поиска по сущностям" if mode == "entity" else "Режим поиска по фрагментам текста"
 
     html = render_template(
         "index.html",
@@ -353,7 +422,7 @@ def faq_page() -> str:
     auth_user = _get_session_user()
     faq_error = ""
     try:
-        rows = db.top_faq_questions(last_n=100, top_n=10)
+        rows = db.top_faq_questions(last_n=100, top_n=5)
     except Exception as exc:
         rows = []
         faq_error = f"FAQ временно недоступен: {exc}"
@@ -373,6 +442,17 @@ def faq_page() -> str:
         index_url=url_for("index"),
         admin_url=url_for("admin_dashboard"),
     )
+
+
+@app.route("/source/file/<path:filename>", methods=["GET"])
+def source_file(filename: str):
+    # Отдаем исходный файл книги/документа для просмотра в браузере.
+    safe_name = Path(filename).name
+    path = _resolve_source_file(safe_name)
+    if path is None:
+        abort(404)
+    as_attachment = (request.args.get("download") or "").strip() == "1"
+    return send_from_directory(str(path.parent), path.name, as_attachment=as_attachment)
 
 
 @app.route("/verify", methods=["GET", "POST"])

@@ -1,33 +1,23 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="ru">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>FAQ</title>
   <style>
-    :root {
-      --bg: #f1f5f9;
-      --card: #ffffff;
-      --text: #0f172a;
-      --muted: #475569;
-      --border: #cbd5e1;
-      --danger: #b91c1c;
-    }
-    body { margin: 0; font-family: "Segoe UI", Arial, sans-serif; background: var(--bg); color: var(--text); }
-    .wrap { max-width: 980px; margin: 24px auto; padding: 0 16px 24px; }
-    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
-    .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-    .toolbar a {
-      text-decoration: none; padding: 8px 10px; border-radius: 8px;
-      border: 1px solid var(--border); color: var(--text); background: #fff; font-size: 13px;
-    }
-    .toprow { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .muted { color: var(--muted); font-size: 13px; }
-    .error { color: var(--danger); font-weight: 600; }
-    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-    th, td { border-bottom: 1px solid var(--border); padding: 10px 8px; text-align: left; vertical-align: top; }
-    th { font-size: 13px; color: #334155; }
-    .answer { white-space: pre-wrap; line-height: 1.45; }
+    :root { --bg:#f1f5f9; --card:#fff; --text:#0f172a; --muted:#475569; --border:#cbd5e1; --danger:#b91c1c; }
+    body { margin:0; font-family:"Segoe UI", Arial, sans-serif; background:var(--bg); color:var(--text); }
+    .wrap { max-width:980px; margin:24px auto; padding:0 16px 24px; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:16px; }
+    .toolbar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    .toolbar a { text-decoration:none; padding:8px 10px; border-radius:8px; border:1px solid var(--border); color:var(--text); background:#fff; font-size:13px; }
+    .toprow { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; }
+    .muted { color:var(--muted); font-size:13px; }
+    .error { color:var(--danger); font-weight:600; }
+    table { width:100%; border-collapse:collapse; margin-top:10px; }
+    th, td { border-bottom:1px solid var(--border); padding:10px 8px; text-align:left; vertical-align:top; }
+    th { font-size:13px; color:#334155; }
+    .answer { white-space:pre-wrap; line-height:1.45; }
   </style>
 </head>
 <body>
@@ -36,12 +26,12 @@
       <div class="toprow">
         <div>
           <h1 style="margin:0">FAQ</h1>
-          <div class="muted">Топ часто задаваемых вопросов.</div>
+          <div class="muted">Показываются 5 самых часто задаваемых вопросов из последних 100 запросов.</div>
         </div>
         <div class="toolbar">
-          <a href="{{ index_url }}">QA</a>
+          <a href="{{ index_url }}">Спросить вопрос</a>
           {% if auth_user %}
-            <span class="muted">Пользователь: <b>{{ auth_user.username }}</b>{% if is_admin %} (admin){% endif %}</span>
+            <span class="muted">Пользователь: <b>{{ auth_user.username }}</b>{% if is_admin %} (админ){% endif %}</span>
             <a href="{{ auth_logout_url }}">Выйти</a>
           {% else %}
             <a href="{{ auth_login_url }}">Авторизация</a>
@@ -63,20 +53,10 @@
     <div class="card">
       {% if faq_rows %}
         <table>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Вопрос</th>
-              <th>Ответ</th>
-            </tr>
-          </thead>
+          <thead><tr><th>#</th><th>Вопрос</th><th>Ответ</th></tr></thead>
           <tbody>
             {% for row in faq_rows %}
-              <tr>
-                <td>{{ loop.index }}</td>
-                <td>{{ row.question }}</td>
-                <td class="answer">{{ row.answer }}</td>
-              </tr>
+              <tr><td>{{ loop.index }}</td><td>{{ row.question }}</td><td class="answer">{{ row.answer }}</td></tr>
             {% endfor %}
           </tbody>
         </table>
