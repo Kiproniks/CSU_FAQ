@@ -1,0 +1,16 @@
+﻿numpy
+scikit-learn
+matplotlib
+pypdf
+pymupdf
+chromadb
+sentence-transformers
+python-dotenv
+pytest
+tqdm
+tiktoken
+flask
+aiogram==3.13.1
+openai>=1.30.0
+requests
+psycopg[binary]>=3.2.0

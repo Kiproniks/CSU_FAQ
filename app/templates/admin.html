@@ -1,0 +1,333 @@
+﻿<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CSU FAQ Admin</title>
+  <style>
+    :root {
+      --bg: #f1f5f9;
+      --card: #ffffff;
+      --text: #0f172a;
+      --muted: #475569;
+      --accent: #0f766e;
+      --border: #cbd5e1;
+    }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .wrap { max-width: 1240px; margin: 24px auto; padding: 0 16px 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    form { display: flex; gap: 8px; flex-wrap: wrap; }
+    input, select, button {
+      padding: 8px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+    button { background: var(--accent); color: #fff; border: 0; cursor: pointer; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th, td {
+      border-bottom: 1px solid var(--border);
+      padding: 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    .muted { color: var(--muted); font-size: 13px; }
+    .chip { padding: 4px 9px; border-radius: 999px; font-size: 12px; border: 1px solid var(--border); text-decoration: none; color: var(--text); }
+    .chart-box { height: 320px; }
+    .admin-badge { color: #0f766e; font-weight: 600; }
+    @media (max-width: 960px) {
+      .row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h2>Админ-панель CSU FAQ</h2>
+      <div class="muted">Управление токенами, пользователями и аналитика. Режим: {{ 'telegram mini app' if is_mini else 'web admin' }} ({{ admin_identity }}).</div>
+      <div class="muted">Месячный лимит пользователя: {{ monthly_limit }} запросов (admins: unlimited).</div>
+      <div style="margin-top: 10px; display:flex; gap:8px; flex-wrap: wrap;">
+        <a href="{{ back_url }}" class="chip">К поиску</a>
+        {% if logout_url %}<a href="{{ logout_url }}" class="chip">Выйти</a>{% endif %}
+      </div>
+      {% if not db_enabled %}
+        <div style="margin-top:10px;color:#b91c1c;font-weight:600;">PostgreSQL недоступен: {{ db_reason or "данные не загружаются" }}.</div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <form method="get" action="{{ dashboard_url }}">
+        <label>Период (дней):</label>
+        <input name="days" type="number" min="1" max="365" value="{{ days }}" style="width: 100px;">
+        {% if access_token %}<input type="hidden" name="access" value="{{ access_token }}">{% endif %}
+        <button type="submit">Обновить графики</button>
+      </form>
+    </div>
+
+    <div class="row">
+      <div class="card">
+        <h3>Активность пользователей (запросы)</h3>
+        <div class="chart-box"><canvas id="activity-chart"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Новые пользователи</h3>
+        <div class="chart-box"><canvas id="new-users-chart"></canvas></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Создать web-пользователя</h3>
+      <form method="post" action="{{ create_user_url }}">
+        <input name="username" placeholder="username" required>
+        <input type="password" name="password" placeholder="password" required>
+        <select name="role">
+          <option value="user">user</option>
+          <option value="admin">admin</option>
+        </select>
+        <input type="hidden" name="days" value="{{ days }}">
+        {% if access_token %}<input type="hidden" name="access" value="{{ access_token }}">{% endif %}
+        <button type="submit">Создать / обновить</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h3>Изменить колличество токенов</h3>
+      <form method="post" action="{{ quota_action_url }}">
+        <input name="external_id" placeholder="external_id (chat_id или username)" style="min-width: 240px;" required>
+        <select name="source">
+          <option value="telegram">telegram</option>
+          <option value="web">web</option>
+        </select>
+        <input name="amount" type="number" min="1" step="1" placeholder="кол-во токенов" style="width: 140px;" required>
+        <select name="action">
+          <option value="add">добавить</option>
+          <option value="take">забрать</option>
+        </select>
+        <input type="hidden" name="days" value="{{ days }}">
+        {% if access_token %}<input type="hidden" name="access" value="{{ access_token }}">{% endif %}
+        <button type="submit">Применить</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h3>Найти пользователя по ID</h3>
+      <form method="post" action="{{ user_lookup_url }}">
+        <input name="external_id" placeholder="external_id (chat_id или username)" style="min-width: 280px;" value="{{ lookup_external_id }}" required>
+        <select name="source">
+          <option value="telegram" {% if lookup_source == "telegram" %}selected{% endif %}>telegram</option>
+          <option value="web" {% if lookup_source == "web" %}selected{% endif %}>web</option>
+        </select>
+        <input type="hidden" name="days" value="{{ days }}">
+        {% if access_token %}<input type="hidden" name="access" value="{{ access_token }}">{% endif %}
+        <button type="submit">Найти</button>
+      </form>
+
+      {% if lookup_error %}
+        <div style="margin-top:10px;color:#b91c1c;font-weight:600;">{{ lookup_error }}</div>
+      {% endif %}
+
+      {% if lookup_user %}
+        <div style="margin-top:10px;"><strong>Пользователь найден:</strong> <code>{{ lookup_user.external_id }}</code> ({{ lookup_user.source }})</div>
+        <table style="margin-top:10px;">
+          <tbody>
+            <tr><th>Внутренний id</th><td>{{ lookup_user.id }}</td></tr>
+            <tr><th>Роль</th><td>{% if lookup_user.is_admin %}<span class="admin-badge">admin</span>{% else %}user{% endif %}</td></tr>
+            <tr><th>Верификация</th><td>{{ "yes" if lookup_user.is_verified else "no" }}</td></tr>
+            <tr><th>Создан</th><td>{{ lookup_user.created_at }}</td></tr>
+            <tr><th>Последний запрос</th><td>{{ lookup_user.last_query_at or "-" }}</td></tr>
+            <tr><th>Запросов за месяц</th><td>{{ lookup_user.month_requests }}</td></tr>
+            <tr><th>Запросов всего</th><td>{{ lookup_user.total_requests }}</td></tr>
+            <tr><th>Бонусные токены</th><td>{{ lookup_user.bonus_tokens }}</td></tr>
+            <tr><th>Активных токенов</th><td>{{ lookup_user.active_tokens }}</td></tr>
+            <tr><th>Эффективный лимит</th><td>{% if lookup_user.is_admin %}unlimited{% else %}{{ monthly_limit + lookup_user.bonus_tokens }}{% endif %}</td></tr>
+          </tbody>
+        </table>
+
+        <div style="margin-top:10px; display:grid; gap:10px;">
+          <form method="post" action="{{ issue_token_url }}">
+            <input type="hidden" name="external_id" value="{{ lookup_user.external_id }}">
+            <input type="hidden" name="source" value="{{ lookup_user.source }}">
+            <input type="hidden" name="lookup_external_id" value="{{ lookup_user.external_id }}">
+            <input type="hidden" name="lookup_source" value="{{ lookup_user.source }}">
+            <input type="hidden" name="days" value="{{ days }}">
+            {% if access_token %}<input type="hidden" name="access" value="{{ access_token }}">{% endif %}
+            <button type="submit">Выдать токен найденному пользователю</button>
+          </form>
+
+          <form method="post" action="{{ quota_action_url }}">
+            <input type="hidden" name="external_id" value="{{ lookup_user.external_id }}">
+            <input type="hidden" name="source" value="{{ lookup_user.source }}">
+            <input type="hidden" name="lookup_external_id" value="{{ lookup_user.external_id }}">
+            <input type="hidden" name="lookup_source" value="{{ lookup_user.source }}">
+            <input name="amount" type="number" min="1" step="1" placeholder="кол-во токенов" style="width: 140px;" required>
+            <select name="action">
+              <option value="add">добавить</option>
+              <option value="take">забрать</option>
+            </select>
+            <input type="hidden" name="days" value="{{ days }}">
+            {% if access_token %}<input type="hidden" name="access" value="{{ access_token }}">{% endif %}
+            <button type="submit">Изменить токены найденного пользователя</button>
+          </form>
+        </div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h3>Пользователи</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>external_id</th>
+            <th>source</th>
+            <th>admin</th>
+            <th>verified</th>
+            <th>запросов в месяце</th>
+            <th>бонус токены</th>
+            <th>активных токенов</th>
+            <th>создан</th>
+            <th>роль</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for u in users %}
+          <tr>
+            <td><code>{{ u.external_id }}</code></td>
+            <td>{{ u.source }}</td>
+            <td>{% if u.is_admin %}<span class="admin-badge">admin</span>{% else %}user{% endif %}</td>
+            <td>{{ "yes" if u.is_verified else "no" }}</td>
+            <td>{{ u.month_requests }}</td>
+            <td>{{ u.bonus_tokens }}</td>
+            <td>{{ u.active_tokens }}</td>
+            <td>{{ u.created_at }}</td>
+            <td>
+              <form method="post" action="{{ user_role_url }}">
+                <input type="hidden" name="external_id" value="{{ u.external_id }}">
+                <input type="hidden" name="source" value="{{ u.source }}">
+                <input type="hidden" name="days" value="{{ days }}">
+                {% if access_token %}<input type="hidden" name="access" value="{{ access_token }}">{% endif %}
+                {% if u.is_admin %}
+                  <input type="hidden" name="action" value="remove_admin">
+                  <button type="submit">Снять admin</button>
+                {% else %}
+                  <input type="hidden" name="action" value="make_admin">
+                  <button type="submit">Назначить admin</button>
+                {% endif %}
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3>Управление токенами</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Токен</th>
+            <th>Пользователь</th>
+            <th>Источник</th>
+            <th>Активен</th>
+            <th>Создан</th>
+            <th>Последнее использование</th>
+            <th>Действие</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for token in tokens %}
+          <tr>
+            <td><code>{{ token.token }}</code></td>
+            <td>{{ token.external_id }}</td>
+            <td>{{ token.source }}</td>
+            <td>{{ "Да" if token.active else "Нет" }}</td>
+            <td>{{ token.created_at }}</td>
+            <td>{{ token.last_used_at or "-" }}</td>
+            <td>
+              <form method="post" action="{{ token_action_url }}">
+                <input type="hidden" name="token" value="{{ token.token }}">
+                <input type="hidden" name="days" value="{{ days }}">
+                {% if access_token %}<input type="hidden" name="access" value="{{ access_token }}">{% endif %}
+                {% if token.active %}
+                <input type="hidden" name="action" value="deactivate">
+                <button type="submit">Отключить</button>
+                {% else %}
+                <input type="hidden" name="action" value="activate">
+                <button type="submit">Включить</button>
+                {% endif %}
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    const activity = {{ activity_json | safe }};
+    const newUsers = {{ new_users_json | safe }};
+
+    function makeChart(canvasId, rows, title, color) {
+      const canvas = document.getElementById(canvasId);
+      if (!canvas || !window.Chart) return;
+
+      const labels = rows.map(r => r.day);
+      const values = rows.map(r => Number(r.count || 0));
+
+      new Chart(canvas, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: title,
+            data: values,
+            borderColor: color,
+            backgroundColor: color + '33',
+            fill: true,
+            tension: 0.2,
+            pointRadius: 3
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            title: { display: true, text: title }
+          },
+          scales: {
+            x: {
+              title: { display: true, text: 'Ось X: дата' }
+            },
+            y: {
+              beginAtZero: true,
+              ticks: { precision: 0 },
+              title: { display: true, text: 'Ось Y: количество' }
+            }
+          }
+        }
+      });
+    }
+
+    makeChart('activity-chart', activity, 'Запросы пользователей', '#0f766e');
+    makeChart('new-users-chart', newUsers, 'Новые пользователи', '#0b5ed7');
+  </script>
+</body>
+</html>

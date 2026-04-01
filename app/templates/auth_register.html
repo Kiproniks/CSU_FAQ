@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Регистрация</title>
+  <style>
+    body { font-family: "Segoe UI", Arial, sans-serif; background: #eef2ff; margin: 0; color: #0f172a; }
+    .wrap { max-width: 520px; margin: 48px auto; padding: 0 16px; }
+    .card { background: #fff; border: 1px solid #c7d2fe; border-radius: 14px; padding: 18px; }
+    .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+    .tab {
+      text-align: center; text-decoration: none; border: 1px solid #cbd5e1; border-radius: 8px;
+      padding: 9px; color: #334155; background: #f8fafc; font-weight: 600;
+    }
+    .tab.active { background: #0f766e; color: #fff; border-color: #0f766e; }
+    input, button {
+      width: 100%; box-sizing: border-box; padding: 10px; margin-top: 8px;
+      border-radius: 8px; border: 1px solid #cbd5e1;
+    }
+    button { background: #0f766e; color: #fff; border: 0; font-weight: 600; cursor: pointer; }
+    .error { color: #b91c1c; font-weight: 600; }
+    .ok { color: #0f766e; font-weight: 600; }
+    .muted { color: #475569; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="tabs">
+        <a class="tab" href="{{ login_url }}">Авторизация</a>
+        <a class="tab active" href="{{ register_url }}">Регистрация</a>
+      </div>
+      <h2>Создать аккаунт</h2>
+      <form method="post">
+        <input name="username" placeholder="Логин (мин. 3 символа)" required />
+        <input type="password" name="password" placeholder="Пароль (мин. 6 символов)" required />
+        <input type="password" name="password_repeat" placeholder="Повторите пароль" required />
+        <input type="hidden" name="next" value="{{ next_url }}" />
+        <button type="submit">Зарегистрироваться</button>
+      </form>
+      {% if error %}<p class="error">{{ error }}</p>{% endif %}
+      {% if success %}<p class="ok">{{ success }}</p>{% endif %}
+      <p class="muted"><a href="/">На главную</a></p>
+    </div>
+  </div>
+</body>
+</html>

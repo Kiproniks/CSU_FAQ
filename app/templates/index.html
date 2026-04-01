@@ -1,0 +1,218 @@
+﻿<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DOMAIN OF KNOWLEDGE CSU</title>
+  <style>
+    :root {
+      --bg: #f1f5f9;
+      --card: #ffffff;
+      --text: #0f172a;
+      --muted: #475569;
+      --accent: #0f766e;
+      --border: #cbd5e1;
+      --danger: #b91c1c;
+    }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%);
+      color: var(--text);
+    }
+    .wrap {
+      max-width: 980px;
+      margin: 24px auto;
+      padding: 0 16px 24px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    h1, h2 { margin: 0 0 12px; }
+    form { display: grid; gap: 10px; }
+    textarea, select, input, button {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      font-size: 14px;
+    }
+    button {
+      background: var(--accent);
+      color: #fff;
+      border: 0;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+    .muted { color: var(--muted); font-size: 13px; }
+    .error { color: var(--danger); font-weight: 600; }
+    .answer { white-space: pre-wrap; line-height: 1.5; }
+    .hit {
+      border-top: 1px solid var(--border);
+      padding-top: 10px;
+      margin-top: 10px;
+    }
+    .source-attribution-card {
+      border: 1px solid #d1d5db;
+      background: #f8fafc;
+      border-radius: 10px;
+      padding: 10px;
+      margin-top: 10px;
+    }
+    a.source-attribution-card {
+      display: block;
+      text-decoration: none;
+      color: inherit;
+      transition: background-color .12s ease, border-color .12s ease;
+    }
+    a.source-attribution-card:hover {
+      background: #eef6ff;
+      border-color: #93c5fd;
+    }
+    .source-attribution-title {
+      font-weight: 700;
+      color: #0f766e;
+    }
+    .source-attribution-meta {
+      color: #475569;
+      font-size: 12px;
+      margin-top: 2px;
+    }
+    .source-attribution-snippet {
+      margin-top: 8px;
+      line-height: 1.45;
+    }
+    .source-download-row {
+      margin-top: 8px;
+    }
+    .source-download-link {
+      display: inline-block;
+      text-decoration: none;
+      font-size: 12px;
+      color: #0f766e;
+      border: 1px solid #99f6e4;
+      background: #f0fdfa;
+      border-radius: 8px;
+      padding: 4px 8px;
+    }
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+      align-items: center;
+    }
+    .toolbar a {
+      text-decoration: none;
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      color: var(--text);
+      background: #fff;
+      font-size: 13px;
+    }
+    .toprow {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="toprow">
+        <div>
+          <h1>DOMAIN OF KNOWLEDGE CSU</h1>
+          {% if monthly_unlimited %}
+            <div class="muted">Лимит: без ограничений (админ). Использовано в этом месяце: {{ monthly_used }}.</div>
+          {% else %}
+            <div class="muted">Лимит: {{ monthly_used }} / {{ monthly_limit }} запросов в этом месяце (осталось {{ monthly_remaining }}).</div>
+          {% endif %}
+        </div>
+        <div class="toolbar">
+          <a href="{{ faq_url }}">FAQ</a>
+          {% if auth_user %}
+            <span class="muted">Пользователь: <b>{{ auth_user.username }}</b>{% if is_admin %} (админ){% endif %}</span>
+            <a href="{{ auth_logout_url }}">Выйти</a>
+          {% else %}
+            <a href="{{ auth_login_url }}">Авторизоваться</a>
+            <a href="{{ auth_register_url }}">Регистрация</a>
+          {% endif %}
+          {% if is_admin %}
+            <a href="{{ admin_url }}">Админ-панель</a>
+          {% endif %}
+        </div>
+      </div>
+      {% if not db_enabled %}
+        <div class="error" style="margin-top: 8px;">PostgreSQL недоступен: {{ db_reason or "статистика и токены не сохраняются" }}.</div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>Вопрос</h2>
+      <form method="post">
+        <textarea name="query" rows="4" placeholder="Введите вопрос...">{{ query }}</textarea>
+        <div class="grid">
+          <div>
+            <label for="mode">Режим:</label>
+            <select name="mode" id="mode">
+              <option value="chunk" {% if mode == "chunk" %}selected{% endif %}>Режим поиска по фрагментам текста</option>
+              <option value="entity" {% if mode == "entity" %}selected{% endif %}>Режим поиска по сущностям</option>
+            </select>
+          </div>
+        </div>
+        <button type="submit">Спросить</button>
+      </form>
+      {% if error %}
+      <p class="error">{{ error }}</p>
+      {% endif %}
+    </div>
+
+    {% if result %}
+    <div class="card">
+      <h2>Ответ</h2>
+      <div class="answer">{{ result.answer }}</div>
+    </div>
+
+    <div class="card">
+      <h2>На чем основан ответ: {{ basis_label }}</h2>
+      {% if basis_cards %}
+        {% for card in basis_cards %}
+        <div class="source-attribution-card">
+        {% if card.open_url %}
+          <a href="{{ card.open_url }}" target="_blank" rel="noopener noreferrer" title="Открыть источник" style="text-decoration:none;color:inherit;display:block;">
+            <div class="source-attribution-title">{{ card.title }}</div>
+            <div class="source-attribution-snippet">{{ snippet(card.text) }}</div>
+          </a>
+        {% else %}
+          <div class="source-attribution-title">{{ card.title }}</div>
+          <div class="source-attribution-snippet">{{ snippet(card.text) }}</div>
+        {% endif %}
+          {% if card.download_url %}
+          <div class="source-download-row">
+            <a class="source-download-link" href="{{ card.download_url }}">Скачать источник</a>
+          </div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="muted">Подходящих фрагментов не найдено.</div>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+</body>
+</html>

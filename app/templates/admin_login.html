@@ -1,0 +1,30 @@
+﻿<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin Login</title>
+  <style>
+    body { font-family: "Segoe UI", Arial, sans-serif; background: #e2e8f0; margin: 0; }
+    .wrap { max-width: 460px; margin: 64px auto; padding: 0 16px; }
+    .card { background: #fff; border: 1px solid #cbd5e1; border-radius: 12px; padding: 18px; }
+    input, button { width: 100%; box-sizing: border-box; padding: 10px; margin-top: 8px; border-radius: 8px; border: 1px solid #cbd5e1; }
+    button { background: #0f766e; color: #fff; border: 0; font-weight: 600; cursor: pointer; }
+    .error { color: #b91c1c; font-weight: 600; }
+    a { color: #0f172a; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h2>Вход в админ-панель</h2>
+      <form method="post">
+        <input type="password" name="password" placeholder="Пароль администратора" />
+        <button type="submit">Войти</button>
+      </form>
+      {% if error %}<p class="error">{{ error }}</p>{% endif %}
+      <p><a href="/">Назад</a></p>
+    </div>
+  </div>
+</body>
+</html>
