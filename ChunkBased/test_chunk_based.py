@@ -1,18 +1,20 @@
 import unittest
-import os
-import shutil
-from ChunkBased import ChunkBased
+from unittest.mock import patch
+
+import chromadb
+
+from ChunkBased.ChunkBased import ChunkBased
 
 class TestChunkBased(unittest.TestCase):
     
     def setUp(self):
-        # Используем уникальное имя коллекции для тестов, чтобы не затереть основную базу
-        self.db_path = "./test_chroma_db"
-        self.chunk_system = ChunkBased(
-            chunk_size=50, 
-            overlap=10, 
-            collection_name="test_collection"
-        )
+        with patch("ChunkBased.ChunkBased.chromadb.PersistentClient", return_value=chromadb.EphemeralClient()):
+            self.chunk_system = ChunkBased(
+                chunk_size=50,
+                overlap=10,
+                collection_name="test_collection"
+            )
+        self.addCleanup(self.chunk_system.client.delete_collection, "test_collection")
         
         self.test_text = (
             "Москва — столица России. В Москве много достопримечательностей. "
@@ -21,13 +23,6 @@ class TestChunkBased(unittest.TestCase):
         
         # Добавляем документ
         self.chunk_system.add_document(self.test_text, doc_id="test_doc")
-
-    def tearDown(self):
-        # Очищаем ресурсы после теста
-        self.chunk_system.clear()
-        # Удаляем папку тестовой БД, если она создалась
-        if os.path.exists("./chroma_db"):
-             pass # Chroma сама управляет файлами, но в тестах лучше делать clear()
 
     def test_add_document(self):
         # Проверяем, что чанки создались и добавились в список
