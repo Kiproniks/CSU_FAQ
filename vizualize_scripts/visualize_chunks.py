@@ -82,10 +82,9 @@ def visualize_both(entity_text: str, chunk_text: str = None):
 if __name__ == "__main__":
     # Пример текста для теста
     test_text = (
-        "Гарри Поттер жил в доме номер четыре по улице Привит-драйв. "
-        "Он был очень несчастлив, потому что его тетя и дядя ненавидели магию. "
-        "В Хогвартсе Гарри учился вместе с Роном и Гермионой. "
-        "Они сражались против Волан-де-Морта."
+        "The library lends books for fourteen days. "
+        "Readers can renew a loan in their account before the due date. "
+        "Books reserved by another reader cannot be renewed."
     )
     
     visualize_both(test_text)

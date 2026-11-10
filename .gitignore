@@ -1,0 +1,39 @@
+# Python and virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local configuration
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+
+# Runtime and demo output
+chroma_db/
+test_chroma_db/
+*.sqlite3
+*.sqlite3-*
+*.log
+*.tmp
+/visualize_chunks/
+/vizualize_from_test/
+/visual_chunk_based_chunks.png
+/visual_entity_chunks.png
+/search_visualization.png
+/search_comparison.png
+
+# Local input data
+/local_data/
+/harry_potter/
+/harry_potter.zip
+
+.DS_Store
+Thumbs.db
