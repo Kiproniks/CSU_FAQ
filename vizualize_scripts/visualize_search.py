@@ -57,4 +57,4 @@ def visualize_search_comparison(entity_results, chunk_results, query: str, save_
 # ====================== Тест ======================
 if __name__ == "__main__":
     print("Запуск тестовой визуализации...")
-    # Можно будет вызывать из test_harry_potter.py
+    # Функцию можно вызвать с результатами поиска по своему набору данных.
